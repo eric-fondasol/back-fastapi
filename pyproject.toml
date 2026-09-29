@@ -8,4 +8,9 @@ dependencies = [
     "sqlalchemy",
     "psycopg[binary]",
     "redis",
+    "PyJWT[crypto]",
+    "httpx",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest"]

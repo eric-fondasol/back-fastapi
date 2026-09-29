@@ -1,12 +1,30 @@
-from fastapi import FastAPI
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app import ex
+from app.auth import current_user, dev_token
 from app.connexions import base, base_apisolscore, cache
 
-app = FastAPI()
-app.include_router(ex.router)
+
+@asynccontextmanager
+async def demarrage(_: FastAPI):
+    dev_token()
+    yield
+
+
+app = FastAPI(lifespan=demarrage)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origine for origine in os.getenv("CORS_ORIGINS", "").split(",") if origine],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+app.include_router(ex.router, dependencies=[Depends(current_user)])
 
 
 @app.get("/api/health")
