@@ -4,16 +4,9 @@ services:
   api:
     build: .
     container_name: solscore_fastapi
-    env_file: .env
     ports:
       - "127.0.0.1:8082:8000"
     volumes:
       - ./app:/srv/app
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-    networks:
-      - refonte
-
-networks:
-  refonte:
-    name: refonte-solscore_default
-    external: true
+      - ./.env:/srv/.env:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-include", ".env"]

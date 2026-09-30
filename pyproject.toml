@@ -7,9 +7,10 @@ dependencies = [
     "uvicorn[standard]",
     "sqlalchemy",
     "psycopg[binary]",
-    "redis",
+    "pydantic-settings",
     "PyJWT[crypto]",
     "httpx",
+    "orjson",
 ]
 
 [project.optional-dependencies]
