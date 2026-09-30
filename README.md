@@ -29,8 +29,34 @@ curl http://localhost:8082/api/health
 - L'API n'écoute que sur la machine (`127.0.0.1:8082`).
 - Le code de `app/` et le `.env` sont montés dans le conteneur : l'API redémarre toute
   seule à chaque modification, y compris du `.env`. Rien à reconstruire.
-- Seules une modification du `Dockerfile` ou des dépendances (`pyproject.toml`)
+- Seules une modification du `Dockerfile` ou des dépendances (`requirements.txt`)
   demandent de reconstruire l'image : `docker compose up -d --build`.
+
+### Dépendances
+
+Deux fichiers, deux rôles :
+
+| Fichier | Rôle | Qui l'écrit |
+|---|---|---|
+| `pyproject.toml` | **ce dont l'API a besoin** : `fastapi`, `sqlalchemy`… sans version | nous, à la main |
+| `requirements.txt` | **les versions exactes installées**, dépendances indirectes comprises | `pip-compile`, jamais à la main |
+
+L'image installe `requirements.txt` : tout le monde a exactement les mêmes versions, en
+local comme en production, et un rebuild ne change rien par surprise.
+
+**Ajouter une dépendance** : l'ajouter dans `pyproject.toml`, puis régénérer
+`requirements.txt`. Les versions déjà figées sont conservées ; seule la nouvelle est
+ajoutée :
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/src" -w /src python:3.13-slim \
+  sh -c "pip install -q pip-tools && python -m piptools compile --strip-extras -o requirements.txt pyproject.toml"
+docker compose up -d --build
+```
+
+**Mettre à jour les versions** : même commande avec `--upgrade` après `compile`, puis
+relancer les tests avant de valider. On le fait volontairement, par exemple une fois par
+trimestre ou pour une faille de sécurité, jamais par hasard lors d'un rebuild.
 
 ### Appeler l'API en local sans jeton Azure
 

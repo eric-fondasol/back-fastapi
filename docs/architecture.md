@@ -128,7 +128,8 @@ back-fastapi/
 │   └── architecture.md                  ce document
 ├── Dockerfile
 ├── docker-compose.yml
-├── pyproject.toml                       dépendances Python
+├── pyproject.toml                       dépendances Python (ce dont l'API a besoin)
+├── requirements.txt                     versions exactes installées (généré par pip-compile)
 ├── .env.example                         modèle de configuration (versionné)
 └── .env                                 configuration réelle (non versionnée)
 ```
