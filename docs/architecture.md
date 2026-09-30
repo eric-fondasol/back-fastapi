@@ -95,27 +95,33 @@ back-fastapi/
 │   │   └── connection.py                connexion à la base d'apisolscore
 │   └── domains/                         métier
 │       ├── map/                         données Fondasol : sites et sondages (tous pays)
-│       │   ├── routes.py
-│       │   ├── schemas.py
-│       │   ├── services.py
-│       │   ├── entities.py
-│       │   └── queries.py
+│       │   ├── routes.py                les URL : reçoit la requête, appelle le service, renvoie la réponse
+│       │   ├── schemas.py               le contrat de l'API : vérifie les entrées, décrit les sorties
+│       │   ├── services.py              le métier : récupère les données, applique les règles et calculs
+│       │   ├── entities.py              les objets métier manipulés par le service (ici, les points)
+│       │   └── queries.py               le SQL : lit la base de données
 │       ├── france/                      données d'enquête France          → /fr/…
 │       │   ├── routes.py                regroupe les thèmes de la France
 │       │   ├── natural_hazards/         aléas naturels                    → /fr/natural-hazards/…
-│       │   ├── geology/
+│       │   │   ├── routes.py            mêmes fichiers que map/, vides pour l'instant
+│       │   │   ├── schemas.py
+│       │   │   ├── services.py
+│       │   │   ├── entities.py
+│       │   │   ├── sources.py           les appels aux services externes (Géorisques…)
+│       │   │   └── queries.py
+│       │   ├── geology/                 … et de même dans chaque thème
 │       │   ├── urban_planning/          PLU, PPR
 │       │   ├── environment/             sites pollués, zones naturelles, CatNat, cavités…
 │       │   ├── hydrogeology/            BSS, ADES
 │       │   └── weather/
 │       ├── canada/                      données d'enquête Canada          → /ca/…
-│       │   ├── routes.py
+│       │   ├── routes.py                regroupe les thèmes du Canada
 │       │   ├── geology/
 │       │   ├── contamination/           GTC, FCSI, sites contaminés…
 │       │   ├── environment/             milieux naturels, faune, eau…
 │       │   └── infrastructure/          pipelines, RBQ, NPRI
 │       └── luxembourg/                  données d'enquête Luxembourg      → /lu/…
-│           ├── routes.py
+│           ├── routes.py                regroupe les thèmes du Luxembourg
 │           └── geology/
 ├── tests/                               même arborescence que app/
 ├── docs/
