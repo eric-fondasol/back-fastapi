@@ -13,6 +13,14 @@ class Config(BaseSettings):
     db_solscore_user: str
     db_solscore_password: SecretStr
 
+    db_audit_host: str
+    db_audit_port: int = 3306
+    db_audit_name: str
+    db_audit_user: str
+    db_audit_password: SecretStr
+
+    log_dir: str = "logs"
+
     oidc_issuer: str
     oidc_audience: str
 

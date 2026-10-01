@@ -7,6 +7,7 @@ dependencies = [
     "uvicorn[standard]",
     "sqlalchemy",
     "psycopg[binary]",
+    "pymysql",
     "pydantic-settings",
     "PyJWT[crypto]",
     "httpx",

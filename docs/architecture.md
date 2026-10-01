@@ -90,9 +90,12 @@ back-fastapi/
 │   ├── core/                            technique, partagé par tous les domaines
 │   │   ├── config.py                    lit et vérifie la configuration (.env)
 │   │   ├── auth.py                      vérification du jeton (Azure et jeton de dev)
-│   │   └── health.py                    sonde /api/health
+│   │   ├── health.py                    sonde /api/health
+│   │   ├── logger.py                    journal : un fichier texte par jour dans logs/
+│   │   ├── timing.py                    chronomètre les étapes d'une requête (base, GeoJSON…)
+│   │   └── audit.py                     trace chaque requête (qui, quoi, comment, quand) dans le journal et la base d'audit
 │   ├── database/                        accès à la base, partagé par tous les domaines
-│   │   └── connection.py                connexion à la base d'apisolscore
+│   │   └── connection.py                connexions à la base d'apisolscore et à la base d'audit
 │   └── domains/                         métier
 │       ├── map/                         données Fondasol : sites et sondages (tous pays)
 │       │   ├── routes.py                les URL : reçoit la requête, appelle le service, renvoie la réponse
@@ -203,6 +206,55 @@ première route, on supprime celui qui ne sert pas.
 entités, et seules les routes convertissent vers les schémas. On peut ainsi faire
 évoluer un algorithme sans changer la réponse de l'API, et inversement.
 
+Une **entité** est une « chose » du métier que le code manipule en interne : un site
+contaminé, un sondage, une zone sismique, un score de risque… Par exemple, dans
+`canada/contamination/` :
+
+```python
+# entities.py
+from dataclasses import dataclass
+
+@dataclass
+class ContaminatedSite:
+    name: str
+    latitude: float
+    longitude: float
+    contaminants: list[str]      # ["plomb", "hydrocarbures"]
+    status: str                  # "actif", "réhabilité"
+
+@dataclass
+class RiskScore:
+    level: str                   # "faible", "moyen", "élevé"
+    nearest_site: ContaminatedSite
+    distance_m: float
+```
+
+`sources.py` récupère les sites auprès du registre canadien et les transforme en
+`ContaminatedSite`. `services.py` fait le calcul sur ces objets :
+
+```python
+# services.py
+def risk_score(sites: list[ContaminatedSite], latitude: float, longitude: float) -> RiskScore:
+    nearest = min(sites, key=lambda site: distance(site, latitude, longitude))
+    ...
+    return RiskScore(level="élevé", nearest_site=nearest, distance_m=120)
+```
+
+L'algorithme ne manipule jamais le JSON brut du registre
+(`site["properties"]["contam_list"]`…), qui dépend du format de la source : il manipule
+des objets aux noms métier. La route reçoit le `RiskScore` et en tire la réponse
+destinée au front (`RiskResponse` dans `schemas.py`, par exemple seulement `level` et
+`distance_m`).
+
+| | `entities.py` | `schemas.py` |
+|---|---|---|
+| Pour qui ? | le code interne (les algorithmes) | le front (ce qu'il envoie et reçoit) |
+| Exemple | `ContaminatedSite`, avec tous ses détails | `RiskResponse` : juste `level` et `distance_m` |
+| Change quand… | l'algorithme évolue | le contrat avec le front évolue |
+
+En résumé : `entities.py` décrit **de quoi parle le métier**, `schemas.py` décrit **ce que
+l'API échange avec l'extérieur**.
+
 `map/` suit la même structure, sans `sources.py` puisque ses données viennent de la
 base. C'est l'exemple complet à suivre : `routes.py` appelle `services.py`, qui appelle
 `queries.py` et renvoie une entité `Points` (définie dans `entities.py`) ; la route la
@@ -228,14 +280,14 @@ notebook :
 
 ```python
 # services.py
-def contamination_risk(latitude: float, longitude: float) -> RiskLevel:
+def contamination_risk(latitude: float, longitude: float) -> RiskScore:
     sites = sources.contaminated_sites_near(latitude, longitude)   # 1. les données
-    return risk_level(sites, latitude, longitude)                  # 2. le calcul
+    return risk_score(sites, latitude, longitude)                  # 2. le calcul
 
-def risk_level(sites: list[ContaminatedSite], latitude: float, longitude: float) -> RiskLevel:
+def risk_score(sites: list[ContaminatedSite], latitude: float, longitude: float) -> RiskScore:
     ...  # calcul pur : testable avec une liste de sites inventée
 
-# ContaminatedSite et RiskLevel sont définis dans entities.py
+# ContaminatedSite et RiskScore sont définis dans entities.py
 ```
 
 **Un fichier par responsabilité, un dossier quand ça grossit.** Tant qu'un thème reste
@@ -527,6 +579,13 @@ démarrage**, avec un message qui nomme la variable en cause.
 | `DB_SOLSCORE_NAME` | oui | nom de la base |
 | `DB_SOLSCORE_USER` | oui | utilisateur de la base |
 | `DB_SOLSCORE_PASSWORD` | oui | mot de passe (traité comme un secret, jamais affiché) |
+| `DB_AUDIT_HOST` | oui | adresse de la base d'audit MySQL (`mysql` avec docker compose) |
+| `DB_AUDIT_PORT` | non (3306) | port de la base d'audit |
+| `DB_AUDIT_NAME` | oui | nom de la base d'audit (`solscore`) |
+| `DB_AUDIT_USER` | oui | utilisateur de la base d'audit |
+| `DB_AUDIT_PASSWORD` | oui | mot de passe de la base d'audit |
+| `DB_AUDIT_ROOT_PASSWORD` | docker compose | mot de passe root du conteneur MySQL (non lu par l'API) |
+| `LOG_DIR` | non (`logs`) | dossier des journaux quotidiens |
 | `OIDC_ISSUER` | oui | émetteur Azure : `https://login.microsoftonline.com/<ID_TENANT>/v2.0` |
 | `OIDC_AUDIENCE` | oui | ID de l'application Azure |
 | `CORS_ORIGINS` | non | adresses du front autorisées, séparées par des virgules |
@@ -544,7 +603,54 @@ contient des mots de passe.
 
 ---
 
-## 9. Faire évoluer l'API
+## 9. Journal et audit
+
+Chaque requête métier est tracée deux fois par `core/audit.py`, avec le même
+identifiant de requête (renvoyé au client dans l'en-tête `X-Request-ID`) :
+
+- **dans un fichier texte par jour**, `logs/AAAA-MM-JJ.txt` (`core/logger.py`) ;
+- **dans la table `audit_log`** de la base MySQL `solscore`, consultable avec phpMyAdmin
+  (`http://localhost:8083`).
+
+| Question | Colonne de `audit_log` |
+|---|---|
+| Qui ? | `username` (issu du jeton ; vide si la requête est refusée), `ip_address`, `user_agent` |
+| Quoi ? | `action` (nom de la fonction de route), `method`, `path`, `status_code` |
+| Comment ? | `details` : paramètres d'URL et corps JSON de la requête (10 Ko au plus), erreur éventuelle |
+| Quand ? | `created_at`, `duration_ms`, et le détail par étape dans `details.timings_ms` |
+
+Ne sont pas tracés : `/api/health`, la documentation (`/docs`, `/openapi.json`) et les
+requêtes `OPTIONS` du navigateur.
+
+L'écriture en base se fait après l'envoi de la réponse. Si la base d'audit est
+injoignable, la requête aboutit quand même et l'erreur est écrite dans le journal du jour.
+
+`details.timings_ms` répartit la durée par étape, en millisecondes : `db` (lecture dans la
+base d'apisolscore, transfert des lignes compris) et `geojson` (construction de la
+réponse). Si `db` grimpe seul, la base ou le réseau sont en cause ; si les deux grimpent
+ensemble, c'est la machine qui fait tourner l'API. Pour mesurer une autre étape (un
+appel à une source externe, un algorithme) :
+
+```python
+from app.core.timing import timed
+
+with timed("georisques"):
+    zones = sources.seismic_zones(latitude, longitude)
+```
+
+Pour écrire dans le journal depuis un service :
+
+```python
+from app.core.logger import logger
+
+logger.info("Géorisques: %s zones reçues", len(zones))
+```
+
+La ligne porte automatiquement l'identifiant de la requête en cours.
+
+---
+
+## 10. Faire évoluer l'API
 
 ### Ajouter une route à un thème
 
@@ -618,7 +724,7 @@ vaut mieux un petit dossier de plus qu'un dossier fourre-tout.
 
 ---
 
-## 10. Lancer et tester
+## 11. Lancer et tester
 
 ```bash
 cp .env.example .env                    # puis renseigner les valeurs

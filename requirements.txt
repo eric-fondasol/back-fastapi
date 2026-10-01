@@ -59,6 +59,8 @@ pydantic-settings==2.15.0
     # via solscore-api (pyproject.toml)
 pyjwt==2.15.1
     # via solscore-api (pyproject.toml)
+pymysql==1.2.3
+    # via solscore-api (pyproject.toml)
 python-dotenv==1.2.3
     # via
     #   pydantic-settings

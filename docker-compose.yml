@@ -9,4 +9,43 @@ services:
     volumes:
       - ./app:/srv/app
       - ./.env:/srv/.env:ro
+      - ./logs:/srv/logs
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-include", ".env"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    container_name: solscore_mysql
+    environment:
+      MYSQL_DATABASE: ${DB_AUDIT_NAME}
+      MYSQL_USER: ${DB_AUDIT_USER}
+      MYSQL_PASSWORD: ${DB_AUDIT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_AUDIT_ROOT_PASSWORD}
+      TZ: Europe/Paris
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: solscore_phpmyadmin
+    environment:
+      PMA_HOST: mysql
+    ports:
+      - "127.0.0.1:8083:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:

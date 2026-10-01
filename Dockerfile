@@ -2,7 +2,8 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    TZ=Europe/Paris
 
 WORKDIR /srv
 
@@ -13,7 +14,8 @@ COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --no-deps .
 
-RUN useradd --create-home --uid 1000 solscore
+RUN useradd --create-home --uid 1000 solscore \
+    && mkdir logs && chown solscore logs
 USER solscore
 
 EXPOSE 8000

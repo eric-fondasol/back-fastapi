@@ -4,6 +4,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from app.core import health
+from app.core.audit import audit
 from app.core.auth import current_user, dev_token
 from app.core.config import config
 from app.domains.canada.routes import router as canada_router
@@ -26,6 +27,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.middleware("http")(audit)
 
 protected = [Depends(current_user)]
 

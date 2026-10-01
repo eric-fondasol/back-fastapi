@@ -9,6 +9,8 @@ Modèle d'API pour structurer apisolscore. Elle fournit au front Solscore :
   déjà branché, les routes restent à y ajouter.
 
 Toutes les routes métier exigent le jeton SSO (Azure AD) de l'utilisateur connecté.
+Chaque requête est tracée (qui, quoi, comment, quand) dans un fichier texte par jour
+(`logs/AAAA-MM-JJ.txt`) et dans la table `audit_log` d'une base MySQL.
 
 L'architecture, le parcours d'une requête et la façon d'ajouter une route, un thème ou
 un pays sont détaillés dans [docs/architecture.md](docs/architecture.md).
@@ -27,6 +29,9 @@ curl http://localhost:8082/api/health
 
 - `http://localhost:8082/` redirige vers la documentation interactive `/docs`.
 - L'API n'écoute que sur la machine (`127.0.0.1:8082`).
+- phpMyAdmin, pour consulter la base d'audit : `http://localhost:8083` (identifiants
+  `DB_AUDIT_USER` / `DB_AUDIT_PASSWORD` du `.env`). MySQL est aussi joignable sur
+  `127.0.0.1:3307`.
 - Le code de `app/` et le `.env` sont montés dans le conteneur : l'API redémarre toute
   seule à chaque modification, y compris du `.env`. Rien à reconstruire.
 - Seules une modification du `Dockerfile` ou des dépendances (`requirements.txt`)
@@ -86,12 +91,13 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **33 tests**, dans deux
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **42 tests**, dans trois
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
 |---|---|---|
 | `tests/core/test_auth.py` | 18 | rien |
+| `tests/core/test_audit.py` | 9 | la base d'apisolscore et la base d'audit |
 | `tests/domains/map/test_routes.py` | 15 | la base d'apisolscore |
 
 ### `tests/core/test_auth.py` — l'authentification (18 tests)
@@ -109,6 +115,22 @@ de faux id tokens, que l'API vérifie exactement comme les vrais.
 | `test_the_dev_token_is_ignored_when_not_configured` | sans `AUTH_DEV_TOKEN` défini, ce jeton ne donne aucun accès |
 | `test_the_dev_token_prevents_startup_outside_dev` (×2) | avec `APP_ENV=prod` ou `staging`, un jeton de dev défini empêche l'API de démarrer |
 | `test_a_too_short_dev_token_prevents_startup` | un jeton de dev de moins de 32 caractères empêche l'API de démarrer |
+
+### `tests/core/test_audit.py` — le journal et l'audit (9 tests)
+
+Pendant les tests, l'écriture en base d'audit est remplacée par une liste en mémoire
+(`tests/conftest.py`) et le journal va dans un dossier temporaire : les tests ne
+polluent ni `audit_log` ni `logs/`.
+
+| Test | Ce qu'il vérifie |
+|---|---|
+| `test_a_request_is_recorded_with_who_what_how_and_when` | une requête acceptée produit une entrée avec l'utilisateur, l'action, la méthode, le chemin, le statut, la durée, l'IP, le corps de la requête, la date, et le même identifiant que l'en-tête `X-Request-ID` |
+| `test_a_rejected_request_is_recorded_as_anonymous` | une requête sans jeton est tracée (401, sans utilisateur) |
+| `test_an_invalid_request_is_recorded` | une requête invalide est tracée (422, avec l'utilisateur) |
+| `test_technical_routes_are_not_recorded` (×3) | `/api/health`, `/docs` et `/openapi.json` ne sont pas tracés |
+| `test_an_unavailable_audit_database_does_not_break_the_request` | si la base d'audit est en panne, la requête répond quand même 200 |
+| `test_an_entry_is_saved_in_the_audit_database` | une entrée est réellement insérée dans `audit_log`, relue, puis supprimée |
+| `test_the_log_file_is_named_after_the_day_of_the_event` | le journal change de fichier quand le jour change |
 
 ### `tests/domains/map/test_routes.py` — les routes de la carte (15 tests)
 

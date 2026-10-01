@@ -1,7 +1,5 @@
 from collections.abc import Sequence
-
 from sqlalchemy import Row
-
 from app.domains.map import queries
 from app.domains.map.entities import Points
 from app.domains.map.schemas import Bounds

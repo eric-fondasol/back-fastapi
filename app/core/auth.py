@@ -3,7 +3,7 @@ from functools import lru_cache
 
 import httpx
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import config
@@ -39,13 +39,14 @@ def unauthorized() -> HTTPException:
     return HTTPException(status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"})
 
 
-def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> str:
+def current_user(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> str:
     if credentials is None:
         raise unauthorized()
 
     expected_dev_token = dev_token()
 
     if expected_dev_token and hmac.compare_digest(credentials.credentials.encode(), expected_dev_token.encode()):
+        request.state.username = config.auth_dev_user
         return config.auth_dev_user
 
     try:
@@ -66,4 +67,5 @@ def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bear
     if not username:
         raise unauthorized()
 
+    request.state.username = username
     return username
