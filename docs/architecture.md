@@ -92,6 +92,7 @@ back-fastapi/
 │   │   ├── auth.py                      vérification du jeton (Azure et jeton de dev)
 │   │   ├── health.py                    sonde /api/health
 │   │   ├── logger.py                    journal : un fichier texte par jour dans logs/
+│   │   ├── warmup.py                    au démarrage : clés Azure et connexions à la base prêtes
 │   │   ├── timing.py                    chronomètre les étapes d'une requête (base, GeoJSON…)
 │   │   └── audit.py                     trace chaque requête (qui, quoi, comment, quand) dans le journal et la base d'audit
 │   ├── database/                        accès à la base, partagé par tous les domaines
@@ -625,9 +626,10 @@ requêtes `OPTIONS` du navigateur.
 L'écriture en base se fait après l'envoi de la réponse. Si la base d'audit est
 injoignable, la requête aboutit quand même et l'erreur est écrite dans le journal du jour.
 
-`details.timings_ms` répartit la durée par étape, en millisecondes : `db` (lecture dans la
-base d'apisolscore, transfert des lignes compris) et `geojson` (construction de la
-réponse). Si `db` grimpe seul, la base ou le réseau sont en cause ; si les deux grimpent
+`details.timings_ms` répartit la durée par étape, en millisecondes : `auth` (vérification
+du jeton, y compris la récupération des clés Azure, faite une fois par heure), `db`
+(lecture dans la base d'apisolscore, transfert des lignes compris) et `geojson`
+(construction de la réponse). Si `db` grimpe seul, la base ou le réseau sont en cause ; si les deux grimpent
 ensemble, c'est la machine qui fait tourner l'API. Pour mesurer une autre étape (un
 appel à une source externe, un algorithme) :
 
@@ -647,6 +649,15 @@ logger.info("Géorisques: %s zones reçues", len(zones))
 ```
 
 La ligne porte automatiquement l'identifiant de la requête en cours.
+
+### Préchauffage au démarrage
+
+Au démarrage, `core/warmup.py` récupère les clés de signature Azure et ouvre deux
+connexions à la base d'apisolscore (le front interroge sites et sondages en parallèle).
+Sans cela, la première requête après chaque démarrage payait environ 200 ms pour Azure
+et 300 ms par connexion. Le journal du jour indique la durée de chaque étape
+(`warm-up: … ready in … ms`). Un échec n'empêche pas l'API de démarrer : il est
+journalisé, et la première requête refait l'opération.
 
 ---
 

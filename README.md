@@ -91,13 +91,14 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **42 tests**, dans trois
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **44 tests**, dans quatre
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
 |---|---|---|
 | `tests/core/test_auth.py` | 18 | rien |
 | `tests/core/test_audit.py` | 9 | la base d'apisolscore et la base d'audit |
+| `tests/core/test_warmup.py` | 2 | la base d'apisolscore |
 | `tests/domains/map/test_routes.py` | 15 | la base d'apisolscore |
 
 ### `tests/core/test_auth.py` — l'authentification (18 tests)
@@ -131,6 +132,16 @@ polluent ni `audit_log` ni `logs/`.
 | `test_an_unavailable_audit_database_does_not_break_the_request` | si la base d'audit est en panne, la requête répond quand même 200 |
 | `test_an_entry_is_saved_in_the_audit_database` | une entrée est réellement insérée dans `audit_log`, relue, puis supprimée |
 | `test_the_log_file_is_named_after_the_day_of_the_event` | le journal change de fichier quand le jour change |
+
+### `tests/core/test_warmup.py` — le préchauffage au démarrage (2 tests)
+
+| Test | Ce qu'il vérifie |
+|---|---|
+| `test_the_warm_up_fetches_the_azure_keys_and_opens_the_database_connections` | les clés Azure sont demandées une fois et deux connexions à la base restent ouvertes dans le pool |
+| `test_an_unreachable_azure_does_not_prevent_startup` | si Azure est injoignable, le préchauffage n'échoue pas : il journalise un avertissement |
+
+Dans les autres tests, le préchauffage est désactivé (`tests/conftest.py`) pour ne pas
+appeler Azure.
 
 ### `tests/domains/map/test_routes.py` — les routes de la carte (15 tests)
 

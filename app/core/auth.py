@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import config
+from app.core.timing import timed
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -40,13 +41,20 @@ def unauthorized() -> HTTPException:
 
 
 def current_user(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> str:
+    with timed("auth"):
+        username = verified_username(credentials)
+
+    request.state.username = username
+    return username
+
+
+def verified_username(credentials: HTTPAuthorizationCredentials | None) -> str:
     if credentials is None:
         raise unauthorized()
 
     expected_dev_token = dev_token()
 
     if expected_dev_token and hmac.compare_digest(credentials.credentials.encode(), expected_dev_token.encode()):
-        request.state.username = config.auth_dev_user
         return config.auth_dev_user
 
     try:
@@ -67,5 +75,4 @@ def current_user(request: Request, credentials: HTTPAuthorizationCredentials | N
     if not username:
         raise unauthorized()
 
-    request.state.username = username
     return username

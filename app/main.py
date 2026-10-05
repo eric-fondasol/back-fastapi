@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from app.core import health
+from app.core import health, warmup
 from app.core.audit import audit
 from app.core.auth import current_user, dev_token
 from app.core.config import config
@@ -16,6 +16,7 @@ from app.domains.map.routes import router as map_router
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     dev_token()
+    warmup.warm_up()
     yield
 
 

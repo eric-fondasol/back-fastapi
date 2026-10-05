@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test des couches Solscore</title>
+<style>
+:root { --bg:#ffffff; --fg:#1b1f24; --muted:#5b6470; --line:#d9dee4; --ok:#1a7f37; --ko:#c62828; --wait:#9a6700; --card:#f6f8fa; }
+@media (prefers-color-scheme: dark) { :root { --bg:#14171b; --fg:#e6e8eb; --muted:#9aa4af; --line:#2c323a; --ok:#4ac26b; --ko:#ff6b6b; --wait:#d4a72c; --card:#1c2026; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width:1100px; margin:0 auto; padding:24px 16px 48px; }
+h1 { font-size:1.5rem; margin:0 0 4px; }
+p { color:var(--muted); margin:6px 0; }
+.bar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:18px 0; padding:12px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+.bar label { display:flex; gap:8px; align-items:center; }
+input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+button { font:inherit; padding:7px 14px; border-radius:6px; border:1px solid var(--line); background:var(--fg); color:var(--bg); cursor:pointer; }
+button.secondary { background:transparent; color:var(--fg); }
+#summary { font-weight:600; }
+.table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+table { border-collapse:collapse; width:100%; min-width:760px; }
+th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+th { font-size:.8rem; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); background:var(--card); }
+tr.group td { background:var(--card); font-weight:600; }
+td.layer { font-family:ui-monospace, Consolas, monospace; font-size:.85rem; word-break:break-all; }
+.st { font-weight:600; white-space:nowrap; }
+.ok { color:var(--ok); } .ko { color:var(--ko); } .wait { color:var(--wait); }
+img.thumb { width:48px; height:48px; border:1px solid var(--line); border-radius:4px; background:repeating-conic-gradient(var(--card) 0 25%, transparent 0 50%) 0 0/12px 12px; }
+a { color:inherit; }
+</style>
+</head>
+<body>
+<main>
+<h1>Test des couches cartographiques de Solscore</h1>
+<p>Cette page demande une tuile à chaque fournisseur de couches, depuis votre navigateur et votre connexion, comme le fait l'application. Elle ne nécessite aucun compte.</p>
+<p>Colonne « Image » : la tuile s'affiche-t-elle ? Colonne « CORS » : le fournisseur autorise-t-il la lecture par une application web (nécessaire à la nouvelle carte, Mapbox) ?</p>
+<div class="bar">
+  <label>Pays et ville du test <input id="where" placeholder="ex. Montréal, Canada"></label>
+  <button id="run">Relancer les tests</button>
+  <button id="copy" class="secondary">Copier le rapport</button>
+  <span id="summary"></span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Aperçu</th><th>Fournisseur</th><th>Couche</th><th>Utilisée par</th><th>Image</th><th>CORS</th><th>Durée</th></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+</div>
+<p style="margin-top:16px">Une fois les tests terminés, cliquez sur « Copier le rapport » et collez-le dans un e-mail à l'équipe Solscore.</p>
+</main>
+<script>
+const TESTS = [{"territory": "FR", "provider": "BRGM", "layer": "ALEARG", "usedBy": "ancien front", "url": "https://geoservices.brgm.fr/risques?SERVICE=WMS&REQUEST=GetMap&STYLE=default&version=1.0.0&LAYERS=ALEARG&format=image%2Fpng&width=256&height=256&SRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "BRGM", "layer": "CAVITE_LOCALISEE", "usedBy": "ancien front", "url": "https://geoservices.brgm.fr/risques?SERVICE=WMS&REQUEST=GetMap&version=1.0.0&LAYERS=CAVITE_LOCALISEE&format=image%2Fpng&width=256&height=256&SRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "BRGM", "layer": "GEOLOGIE", "usedBy": "ancien front", "url": "https://geoservices.brgm.fr/geologie?SERVICE=WMS&REQUEST=GetMap&version=1.0.0&LAYERS=GEOLOGIE&format=image%2Fpng&width=256&height=256&SRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "BRGM", "layer": "GEOLOGIE", "usedBy": "refonte", "url": "https://geoservices.brgm.fr/geologie?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=GEOLOGIE&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "FR", "provider": "BRGM", "layer": "MVT_LOCALISE", "usedBy": "ancien front", "url": "https://geoservices.brgm.fr/risques?SERVICE=WMS&REQUEST=GetMap&version=1.0.0&LAYERS=MVT_LOCALISE&format=image%2Fpng&width=256&height=256&SRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "BRGM", "layer": "REMNAPPE_FIAB", "usedBy": "ancien front", "url": "https://geoservices.brgm.fr/risques?SERVICE=WMS&REQUEST=GetMap&version=1.0.0&LAYERS=REMNAPPE_FIAB&format=image%2Fpng&width=256&height=256&SRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "BRGM (Géorisques)", "layer": "SSP_CLASSIFICATION_SIS", "usedBy": "ancien front", "url": "https://mapsref.brgm.fr/wxs/georisques/risques?service=WMS&service=WMS&request=GetMap&layers=SSP_CLASSIFICATION_SIS&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&SRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Arretes_de_protection_de_biotope", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Arretes_de_protection_de_biotope&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Parcs_nationaux", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Parcs_nationaux&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Perimetre_de_protection_dune_reserve_naturelle_nationale", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Perimetre_de_protection_dune_reserve_naturelle_nationale&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:2154&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Perimetre_de_protection_dune_reserve_naturelle_regionale", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Perimetre_de_protection_dune_reserve_naturelle_regionale&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Reserves_Naturelles_Nationales", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Reserves_Naturelles_Nationales&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:2154&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Reserves_naturelles_regionales", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Reserves_naturelles_regionales&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Sites_Ramsar", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Sites_Ramsar&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Sites_d_importance_communautaire", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Sites_d_importance_communautaire&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "ZICO", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=ZICO&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Znieff1", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Znieff1&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Znieff2", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Znieff2&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Carmen (INPN/MNHN)", "layer": "Zones_de_protection_speciale", "usedBy": "ancien front", "url": "https://ws.carmencarto.fr/WMS/119/fxx_inpn?&service=WMS&request=GetMap&layers=Zones_de_protection_speciale&styles=&format=image%2Fpng&transparent=true&version=1.1.1&width=256&height=256&srs=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137", "kind": "image"}, {"territory": "FR", "provider": "Fondasol (auto-hébergé)", "layer": "sis_test2", "usedBy": "ancien front", "url": "https://solscore.fondasol.fr/mbtiles/data/sis_test2/8/129/88.png", "kind": "image"}, {"territory": "FR", "provider": "Géorisques (API REST)", "layer": "api/v1/zonage_sismique", "usedBy": "ancien front", "url": "https://www.georisques.gouv.fr/api/v1/zonage_sismique?code_insee=75056&page=1&page_size=10", "kind": "json"}, {"territory": "FR", "provider": "Géorisques (MTE/BRGM)", "layer": "ALEA_SYNT_01_04FAI_FXX,ALEA_SYNT_01_02MOY_FXX,ALEA_SYNT_01_01FOR_FXX", "usedBy": "ancien front", "url": "https://www.georisques.gouv.fr/services?SRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&format=image/png&service=WMS&version=1.1.1&request=GetMap&transparent=true&width=256&height=256&layers=ALEA_SYNT_01_04FAI_FXX,ALEA_SYNT_01_02MOY_FXX,ALEA_SYNT_01_01FOR_FXX", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "CADASTRALPARCELS.PARCELLAIRE_EXPRESS", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&FORMAT=image%2Fpng&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "CADASTRALPARCELS.PARCELLAIRE_EXPRESS", "usedBy": "refonte", "url": "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&STYLE=PCI%20vecteur&FORMAT=image%2Fpng&TILEMATRIXSET=PM_0_19&TILEMATRIX=14&TILEROW=5636&TILECOL=8298", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "GEOGRAPHICALGRIDSYSTEMS.ETATMAJOR40", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=GEOGRAPHICALGRIDSYSTEMS.ETATMAJOR40&FORMAT=image%2Fjpeg&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&FORMAT=image%2Fjpeg&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "LANDCOVER.CLC18_FR", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=LANDCOVER.CLC18_FR&FORMAT=image%2Fpng&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "ORTHOIMAGERY.ORTHOPHOTOS.1950-1965", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=ORTHOIMAGERY.ORTHOPHOTOS.1950-1965&FORMAT=image%2Fpng&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "ORTHOIMAGERY.ORTHOPHOTOS2000-2005", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=ORTHOIMAGERY.ORTHOPHOTOS2000-2005&FORMAT=image%2Fjpeg&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "ORTHOIMAGERY.ORTHOPHOTOS2006-2010", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=ORTHOIMAGERY.ORTHOPHOTOS2006-2010&FORMAT=image%2Fjpeg&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "ORTHOIMAGERY.ORTHOPHOTOS2016-2020", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=ORTHOIMAGERY.ORTHOPHOTOS2016-2020&FORMAT=image%2Fjpeg&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "ORTHOIMAGERY.ORTHOPHOTOS2021-2023", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=ORTHOIMAGERY.ORTHOPHOTOS2021-2023&FORMAT=image%2Fjpeg&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "FR", "provider": "IGN (Géoplateforme)", "layer": "ORTHOIMAGERY.ORTHOPHOTOS2024", "usedBy": "ancien front", "url": "https://data.geopf.fr/wms-r?LAYERS=ORTHOIMAGERY.ORTHOPHOTOS2024&FORMAT=image%2Fjpeg&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=259274.39994331822,6249491.432596011,261720.38484844385,6251937.417501137&WIDTH=256&HEIGHT=256&srs=EPSG:3857", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "2119_2", "usedBy": "ancien front", "url": "https://wms.geoportail.lu/public_map_layers/service?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=2119_2&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=TRUE&SRS=EPSG%3A3857&BBOX=679983.803624928,6379128.63256767,682429.7885300537,6381574.617472796&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "214_1", "usedBy": "ancien front", "url": "https://wms.geoportail.lu/public_map_layers/service?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=214_1&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=TRUE&SRS=EPSG%3A3857&BBOX=679983.803624928,6379128.63256767,682429.7885300537,6381574.617472796&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "2167_1", "usedBy": "refonte", "url": "https://wms.geoportail.lu/public_map_layers/service?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=2167_1&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG:3857&BBOX=679983.803624928,6379128.63256767,682429.7885300537,6381574.617472796&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "573_1", "usedBy": "ancien front", "url": "https://wms.geoportail.lu/public_map_layers/service?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=573_1&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=TRUE&SRS=EPSG%3A3857&BBOX=679983.803624928,6379128.63256767,682429.7885300537,6381574.617472796&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "664_1", "usedBy": "ancien front", "url": "https://wms.geoportail.lu/public_map_layers/service?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=664_1&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=TRUE&SRS=EPSG%3A3857&BBOX=679983.803624928,6379128.63256767,682429.7885300537,6381574.617472796&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "749", "usedBy": "ancien front", "url": "https://wms.geoportail.lu/public_map_layers/service?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=749&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=TRUE&SRS=EPSG%3A3857&BBOX=679983.803624928,6379128.63256767,682429.7885300537,6381574.617472796&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "geo_carte_geol_harmonisee", "usedBy": "ancien front", "url": "https://wmsproxy.geoportail.lu/ogcproxywms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=geo_carte_geol_harmonisee&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=TRUE&SRS=EPSG%3A3857&BBOX=679983.803624928,6379128.63256767,682429.7885300537,6381574.617472796&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "ortho_latest", "usedBy": "ancien front", "url": "https://wmts1.geoportail.lu/opendata/wmts/ortho_latest/GLOBAL_WEBMERCATOR_4_V3/14/8470/5583.jpeg", "kind": "image"}, {"territory": "LU", "provider": "Geoportail.lu", "layer": "topo_5k", "usedBy": "ancien front", "url": "https://wmts1.geoportail.lu/opendata/wmts/topo_5k/GLOBAL_WEBMERCATOR_4_V3/14/8470/5583.png", "kind": "image"}, {"territory": "CA", "provider": "Canards Illimités Canada", "layer": "0", "usedBy": "ancien front", "url": "https://maps.ducks.ca/arcgis/services/Public/QC_Carto_MH_sudqc_2022/MapServer/WMSServer?LAYERS=0&FORMAT=image%2Fpng&TRANSPARENT=true&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "CA", "provider": "Québec (CPTAQ)", "layer": "demande", "usedBy": "refonte", "url": "https://carto.cptaq.gouv.qc.ca/cgi-bin/v2/cptaq?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=demande&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "CA", "provider": "Québec (Environnement)", "layer": "Ensemble_des_aires_protégées_et_autres_mesures_de_conservation_efficaces5256", "usedBy": "ancien front", "url": "https://geo.environnement.gouv.qc.ca/donnees/services/Biodiversite/Aires_protegees/MapServer/WMSServer?LAYERS=Ensemble_des_aires_prot%C3%A9g%C3%A9es_et_autres_mesures_de_conservation_efficaces5256&FORMAT=image%2Fpng&TRANSPARENT=true&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&STYLES=&SRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "CA", "provider": "Québec (Environnement)", "layer": "Milieux_humides_potentiels11904", "usedBy": "ancien front", "url": "https://www.servicesgeo.enviroweb.gouv.qc.ca/donnees/services/Public/Themes_publics/MapServer/WMSServer?LAYERS=Milieux_humides_potentiels11904&FORMAT=image%2Fpng&TRANSPARENT=true&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "CA", "provider": "Québec (MSP)", "layer": "GRHQ_RES_LIN_INTER", "usedBy": "ancien front", "url": "https://geoegl.msp.gouv.qc.ca/apis/wss/environnement.fcgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=GRHQ_RES_LIN_INTER&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "CA", "provider": "Québec (MSP)", "layer": "GRHQ_RES_LIN_PERM", "usedBy": "ancien front", "url": "https://geoegl.msp.gouv.qc.ca/apis/wss/environnement.fcgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=GRHQ_RES_LIN_PERM&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "CA", "provider": "Québec (MSP)", "layer": "GRHQ_RES_SURF", "usedBy": "ancien front", "url": "https://geoegl.msp.gouv.qc.ca/apis/wss/environnement.fcgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=GRHQ_RES_SURF&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}, {"territory": "CA", "provider": "Québec (MSP)", "layer": "GRHQ_SENS_ECOULEMENT", "usedBy": "ancien front", "url": "https://geoegl.msp.gouv.qc.ca/apis/wss/environnement.fcgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=GRHQ_SENS_ECOULEMENT&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=true&CRS=EPSG:3857&BBOX=-8191603.447265768,5699144.828942742,-8189157.462360643,5701590.813847868&WIDTH=256&HEIGHT=256", "kind": "image"}];
+const TERRITORIES = { FR: "France", LU: "Luxembourg", CA: "Canada (Québec)" };
+const TIMEOUT_MS = 20000;
+const rows = document.getElementById("rows");
+const results = new Map();
+
+function cell(text, className) {
+  const td = document.createElement("td");
+  if (className) td.className = className;
+  td.textContent = text;
+  return td;
+}
+
+function render() {
+  rows.replaceChildren();
+  let current = null;
+  TESTS.forEach((test, index) => {
+    if (test.territory !== current) {
+      current = test.territory;
+      const tr = document.createElement("tr");
+      tr.className = "group";
+      const td = cell(TERRITORIES[current]);
+      td.colSpan = 7;
+      tr.append(td);
+      rows.append(tr);
+    }
+    const tr = document.createElement("tr");
+    const preview = document.createElement("td");
+    if (test.kind === "image") {
+      const img = document.createElement("img");
+      img.className = "thumb";
+      img.alt = "";
+      img.id = "img-" + index;
+      preview.append(img);
+    } else {
+      preview.textContent = "JSON";
+    }
+    const layer = cell(test.layer, "layer");
+    const link = document.createElement("a");
+    link.href = test.url; link.target = "_blank"; link.rel = "noopener"; link.textContent = " ↗";
+    layer.append(link);
+    tr.append(preview, cell(test.provider), layer, cell(test.usedBy), cell("…", "st wait"), cell("…", "st wait"), cell(""));
+    tr.id = "row-" + index;
+    rows.append(tr);
+  });
+}
+
+function setCell(index, column, ok, text) {
+  const td = document.getElementById("row-" + index).children[column];
+  td.textContent = text;
+  td.className = "st " + (ok === null ? "wait" : ok ? "ok" : "ko");
+}
+
+function withTimeout(promise) {
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("délai dépassé")), TIMEOUT_MS))]);
+}
+
+function loadImage(index, url) {
+  return withTimeout(new Promise((resolve, reject) => {
+    const img = document.getElementById("img-" + index);
+    img.onload = () => (img.naturalWidth > 0 ? resolve() : reject(new Error("image vide")));
+    img.onerror = () => reject(new Error("pas une image (erreur ou refus)"));
+    img.src = url + (url.includes("?") ? "&" : "?") + "_t=" + Date.now();
+  }));
+}
+
+async function fetchCors(url, expectJson) {
+  const response = await withTimeout(fetch(url, { mode: "cors", cache: "no-store" }));
+  if (!response.ok) throw new Error("HTTP " + response.status);
+  if (expectJson) await response.json(); else await response.blob();
+}
+
+async function runOne(test, index) {
+  const started = performance.now();
+  const result = { image: null, cors: null };
+  if (test.kind === "image") {
+    try { await loadImage(index, test.url); result.image = "OK"; setCell(index, 4, true, "OK"); }
+    catch (error) { result.image = "KO : " + error.message; setCell(index, 4, false, "KO"); document.getElementById("row-" + index).children[4].title = error.message; }
+  } else {
+    setCell(index, 4, null, "—");
+  }
+  try { await fetchCors(test.url, test.kind === "json"); result.cors = "OK"; setCell(index, 5, true, "OK"); }
+  catch (error) { result.cors = "KO : " + error.message; setCell(index, 5, false, "KO"); document.getElementById("row-" + index).children[5].title = error.message; }
+  result.ms = Math.round(performance.now() - started);
+  document.getElementById("row-" + index).children[6].textContent = result.ms + " ms";
+  results.set(index, result);
+  updateSummary();
+}
+
+function updateSummary() {
+  const done = results.size;
+  const failed = [...results.values()].filter((r) => (r.image && r.image !== "OK") || r.cors !== "OK").length;
+  document.getElementById("summary").textContent =
+    done < TESTS.length ? `${done} / ${TESTS.length} testées…` : `${TESTS.length} couches testées, ${failed} en échec`;
+}
+
+async function runAll() {
+  results.clear();
+  render();
+  updateSummary();
+  const queue = TESTS.map((test, index) => [test, index]);
+  const workers = Array.from({ length: 4 }, async () => {
+    while (queue.length) { const [test, index] = queue.shift(); await runOne(test, index); }
+  });
+  await Promise.all(workers);
+}
+
+document.getElementById("run").addEventListener("click", runAll);
+document.getElementById("copy").addEventListener("click", async () => {
+  const lines = [
+    "Test des couches Solscore",
+    "Lieu : " + (document.getElementById("where").value || "non précisé"),
+    "Date : " + new Date().toISOString(),
+    "Fuseau : " + Intl.DateTimeFormat().resolvedOptions().timeZone,
+    "Navigateur : " + navigator.userAgent,
+    "",
+    ...TESTS.map((test, index) => {
+      const r = results.get(index) || {};
+      return `[${test.territory}] ${test.provider} | ${test.layer} | image ${r.image ?? "—"} | CORS ${r.cors ?? "—"} | ${r.ms ?? "?"} ms`;
+    }),
+  ];
+  const text = lines.join("\n");
+  try { await navigator.clipboard.writeText(text); document.getElementById("copy").textContent = "Rapport copié"; }
+  catch { const area = document.createElement("textarea"); area.value = text; area.style.width = "100%"; area.rows = 12; document.querySelector("main").append(area); area.select(); }
+});
+runAll();
+</script>
+</body>
+</html>

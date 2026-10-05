@@ -63,7 +63,7 @@ def test_a_request_is_recorded_with_who_what_how_and_when(client, audit_entries)
     details = orjson.loads(recorded["details"])
 
     assert details["body"] == ATLANTIC
-    assert set(details["timings_ms"]) == {"db", "geojson"}
+    assert set(details["timings_ms"]) == {"auth", "db", "geojson"}
     assert all(duration >= 0 for duration in details["timings_ms"].values())
     assert sum(details["timings_ms"].values()) <= recorded["duration_ms"] + 2
     assert before <= recorded["created_at"] <= datetime.now()
