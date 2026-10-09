@@ -521,6 +521,7 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /searchSitesByAreaDetails` | les sites, avec `uuid`, `affaire_id`, `affaire_numero`, `affaire_nom` |
 | `POST /searchSurveysByArea` | les sondages de l'emprise, positions seules |
 | `POST /searchSurveysByAreaDetails` | les sondages, avec `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique` |
+| `POST /fr/land-registry/parcels` | une parcelle du cadastre français (GeoJSON), lue sur l'API Carto de l'IGN |
 | `GET /api/health` | l'état de la connexion à la base (publique) |
 
 **Requête :**
@@ -556,11 +557,29 @@ La documentation interactive de toutes les routes est disponible sur
 - `has_mesure_pressiometrique` vaut toujours `true` ou `false`, jamais `null`.
 - Une zone sans donnée renvoie une collection vide, pas une erreur.
 
+**Parcelle cadastrale (France)** — reprise de `/cadastre_fr` de l'ancien apisolscore, qui
+relayait déjà l'API Carto de l'IGN (`apicarto.ign.fr/api/cadastre/parcelle`) :
+
+```json
+{ "code_insee": "84129", "section": "AB", "parcelle": "4", "com_abs": "000" }
+```
+
+`code_insee` sur 5 caractères (Corse : `2A…`, `2B…`) ; section, numéro et commune absorbée
+complétés par des zéros (`AB`, `0004`, `000` par défaut). Réponse : une `FeatureCollection`
+d'une parcelle (MultiPolygon en WGS 84), propriétés `idu`, `code_insee`, `nom_com`,
+`com_abs`, `section`, `numero`, `feuille`, `contenance` (surface cadastrale, m²) et
+`superficie_m2` (surface calculée sur la sphère). Différence avec l'ancien endpoint : la
+collection est renvoyée directement (plus d'enveloppe `data`), sans `color`.
+Parcelle inconnue : `404 {"detail": "Parcelle 84129000AB0123 introuvable"}` ; IGN
+injoignable : `502`.
+
 **Erreurs :**
 
 | Statut | Cause |
 |---|---|
 | 401 | jeton absent, invalide ou expiré |
+| 404 | parcelle introuvable (`/fr/land-registry/parcels`) |
+| 502 | service externe injoignable (`/fr/land-registry/parcels`) |
 | 422 | requête invalide ; la réponse nomme le champ en cause |
 | 503 | `/api/health` uniquement : base injoignable |
 
@@ -761,6 +780,7 @@ le [README](../README.md).
 |---|---|---|
 | `tests/core/test_auth.py` | acceptation et refus des jetons ; règles du jeton de développement | rien (faux jetons signés par une clé générée) |
 | `tests/domains/map/test_routes.py` | GeoJSON bien formé, points dans l'emprise, propriétés, emprises invalides | la base d'apisolscore, en lecture |
+| `tests/domains/france/land_registry/` | référence complétée par des zéros, surfaces, conversion de l'IGN ; route : parcelle trouvée, 404, 502, 422, 401 | rien (IGN simulé) |
 
 ---
 
