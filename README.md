@@ -108,7 +108,7 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **423 tests**, dans dix-neuf
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **432 tests**, dans vingt-deux
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
@@ -127,6 +127,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/domains/projects/test_routes.py` | 74 | la base métier de test |
 | `tests/domains/investigations/test_routes.py` | 30 | la base métier de test |
 | `tests/domains/projects/test_ged.py` | 14 | la base métier de test (GED simulée) |
+| `tests/domains/layer_catalog/test_routes.py` | 9 | base de test (migration `0007` rejouée par sa fonction `seed`) |
 | `tests/domains/survey_imports/test_routes.py` | 13 | rien (classeurs .xlsx créés par le test ; .xls dans `fixtures/`, généré par `make_sondages_xls.py`) |
 | `tests/domains/socle/test_routes.py` | 28 | la base métier de test (images dans un dossier temporaire) |
 | `tests/domains/reports/test_reports.py` | 13 | rien (dépôt FTP simulé) |
