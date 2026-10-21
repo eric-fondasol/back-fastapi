@@ -8,9 +8,14 @@ services:
       - "127.0.0.1:8082:8000"
     volumes:
       - ./app:/srv/app
+      - ./migrations:/srv/migrations
+      - ./alembic.ini:/srv/alembic.ini:ro
       - ./.env:/srv/.env:ro
       - ./logs:/srv/logs
+      - ./uploads:/srv/uploads
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-include", ".env"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       mysql:
         condition: service_healthy

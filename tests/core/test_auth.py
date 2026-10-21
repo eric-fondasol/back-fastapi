@@ -3,6 +3,7 @@ import time
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -123,3 +124,28 @@ def test_a_too_short_dev_token_prevents_startup(monkeypatch):
     with pytest.raises(RuntimeError, match="32 characters"):
         with TestClient(app):
             pass
+
+
+def test_the_identity_carries_the_azure_identifier_and_name(monkeypatch):
+    token = id_token(oid="6f9619ff-8b86-d011-b42d-00c04fc964ff", name="Jean Dupont")
+
+    identity = auth.verified_identity(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token))
+
+    assert identity == auth.Identity("jean.dupont@fondasol.fr", "6f9619ff-8b86-d011-b42d-00c04fc964ff", "Jean Dupont")
+
+
+def test_the_identity_leaves_missing_claims_empty():
+    identity = auth.verified_identity(HTTPAuthorizationCredentials(scheme="Bearer", credentials=id_token(name=" ")))
+
+    assert (identity.azure_oid, identity.name) == (None, None)
+
+
+def test_the_dev_token_always_gives_the_same_azure_identifier(monkeypatch):
+    monkeypatch.setattr(config, "app_env", "dev")
+    monkeypatch.setattr(config, "auth_dev_token", SecretStr(DEV_TOKEN))
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=DEV_TOKEN)
+
+    first, second = auth.verified_identity(credentials), auth.verified_identity(credentials)
+
+    assert first.username == config.auth_dev_user
+    assert first.azure_oid is not None and first.azure_oid == second.azure_oid

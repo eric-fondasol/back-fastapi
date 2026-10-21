@@ -94,10 +94,19 @@ back-fastapi/
 │   │   ├── logger.py                    journal : un fichier texte par jour dans logs/
 │   │   ├── warmup.py                    au démarrage : clés Azure et connexions à la base prêtes
 │   │   ├── timing.py                    chronomètre les étapes d'une requête (base, GeoJSON…)
-│   │   └── audit.py                     trace chaque requête (qui, quoi, comment, quand) dans le journal et la base d'audit
-│   ├── database/                        accès à la base, partagé par tous les domaines
-│   │   └── connection.py                connexions à la base d'apisolscore et à la base d'audit
+│   │   ├── audit.py                     trace chaque requête (qui, quoi, comment, quand) dans le journal et la base d'audit
+│   │   ├── errors.py                    erreurs métier (NotFound, Conflict…) et leur code HTTP
+│   │   ├── body.py                      lecture d'un corps JSON contrôlé par les règles métier (400)
+│   │   └── profile.py                   profil de l'agent connecté dans la base métier (table users)
+│   ├── database/                        accès aux bases, partagé par tous les domaines
+│   │   └── connection.py                connexions à apisolscore, à la base métier et à la base d'audit
 │   └── domains/                         métier
+│       ├── profile/                     profil de l'agent connecté : préférences et favoris → /me/…
+│       ├── projects/                    affaires, sondages, repositionnement, référentiels, GED → /projects/…
+│       ├── investigations/              enquêtes enregistrées et leurs versions → /investigations/…
+│       ├── socle/                       paramétrage, statistiques, zones restreintes, images d'attente
+│       ├── reports/                     archive ZIP des rapports, lus sur le dépôt FTP → /reports
+│       ├── desk_study/                  planches de l'enquête documentaire, fiches Infoterre
 │       ├── map/                         données Fondasol : sites et sondages (tous pays)
 │       │   ├── routes.py                les URL : reçoit la requête, appelle le service, renvoie la réponse
 │       │   ├── schemas.py               le contrat de l'API : vérifie les entrées, décrit les sorties
@@ -127,6 +136,9 @@ back-fastapi/
 │       └── luxembourg/                  données d'enquête Luxembourg      → /lu/…
 │           ├── routes.py                regroupe les thèmes du Luxembourg
 │           └── geology/
+├── migrations/                          migrations Alembic du schéma de la base métier
+│   └── versions/                        une révision par changement de schéma (0001 : schéma de départ)
+├── alembic.ini                          configuration d'Alembic
 ├── tests/                               même arborescence que app/
 ├── docs/
 │   └── architecture.md                  ce document
@@ -326,6 +338,7 @@ Ces modèles deviendront utiles le jour où l'API écrira dans une base qui lui 
 | `app/domains/map/` | à la racine, pour garder le contrat actuel du front : `/searchSitesByArea`… |
 | `app/domains/france/natural_hazards/` | `/fr/natural-hazards/…` |
 | `app/domains/canada/contamination/` | `/ca/contamination/…` |
+| `app/domains/canada/land_registry/` | `/ca/land-registry/lots` (Cadastre allégé du Québec) |
 | `app/domains/luxembourg/geology/` | `/lu/geology/…` |
 
 Conventions : code pays ISO (`fr`, `ca`, `lu`), noms en anglais, mots séparés par des
@@ -508,6 +521,55 @@ Garde-fous :
   connexion). `database/connection.py` garde jusqu'à 5 connexions ouvertes (15 en pic) et
   les réutilise. Une connexion coupée est détectée et remplacée automatiquement.
 
+### La base métier (`refonte`)
+
+Depuis l'ADR-0034 du front (14/10/2026), back-fastapi remplace le back Symfony, lot par lot.
+Il écrit donc dans la base métier de la refonte (PostgreSQL + PostGIS, conteneur
+`refonte_postgis` en local) : affaires, sondages, profils, favoris, enquêtes. L'entrepôt
+d'apisolscore reste en lecture seule, pour la carte.
+
+| Fonction (`database/connection.py`) | Rôle |
+|---|---|
+| `refonte_rows(sql, **paramètres)` | lecture : liste de dictionnaires (colonne → valeur) |
+| `refonte_row(sql, **paramètres)` | lecture : première ligne, ou `None` |
+| `refonte_transaction()` | écriture : `with refonte_transaction() as connection:` ouvre une transaction validée à la sortie du bloc, annulée en cas d'erreur |
+
+**Schéma** : tenu par Alembic (`migrations/versions/`). Doctrine (back Symfony) ne crée plus
+rien. La révision `0001` est le schéma de la base au 14/10/2026, extrait par `pg_dump` ; elle
+crée toutes les tables sur une base vide. Sur une base déjà créée par Symfony, on ne
+l'applique pas : on la marque à jour.
+
+```bash
+docker compose exec api alembic stamp 0001     # base existante, une seule fois
+docker compose exec api alembic upgrade head   # appliquer les révisions suivantes
+docker compose exec api alembic current        # révision de la base
+```
+
+Ajouter une révision : `docker compose exec api alembic revision -m "titre court"`, puis
+écrire `upgrade()` à la main avec `op.execute(...)` (pas d'autogénération : il n'y a pas de
+modèle SQLAlchemy).
+
+**Profil courant** : `core/profile.py` fournit la dépendance `current_profile`. À la
+première requête d'un agent, son profil est créé dans `users` à partir du jeton (oid,
+adresse, nom). Ensuite, il est retrouvé par son oid. Un jeton sans oid valide reçoit un 403.
+
+```python
+@router.put("/me/favorites/layers/{layer_id}")
+def add_favorite_layer(layer_id: str, profile: Profile = Depends(current_profile)):
+    ...
+```
+
+**Erreurs métier** : un service lève une erreur de `core/errors.py`, et l'API répond le
+code correspondant avec `{ "errors": "<message>" }`, le format du back Symfony.
+
+| Erreur | Code |
+|---|---|
+| `InvalidRequest` | 400 |
+| `Forbidden` | 403 |
+| `NotFound` | 404 |
+| `Conflict` | 409 |
+| `Unprocessable` | 422 |
+
 ---
 
 ## 7. Contrat des routes
@@ -522,7 +584,38 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /searchSurveysByArea` | les sondages de l'emprise, positions seules |
 | `POST /searchSurveysByAreaDetails` | les sondages, avec `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique` |
 | `POST /fr/land-registry/parcels` | une parcelle du cadastre français (GeoJSON), lue sur l'API Carto de l'IGN |
-| `GET /api/health` | l'état de la connexion à la base (publique) |
+| `GET /me` | le profil de l'agent connecté (`id`, `email`, `displayName`), créé ou mis à jour |
+| `GET` · `PATCH /me/preferences` | langue, thème, territoire par défaut, style de carte, « Mes couches », `extra` |
+| `GET /me/favorites` | affaires, couches et adresses favorites |
+| `PUT` · `DELETE /me/favorites/projects/{numéro}`, `/me/favorites/layers/{id}` | ajout et retrait d'un favori (204) |
+| `POST /me/favorites/addresses` · `DELETE /me/favorites/addresses/{id}` | adresse favorite : 201 créée, 200 déjà présente, 422 au-delà de 20 |
+| `POST /me/favorites/import` | reprise unique des favoris du navigateur ; renvoie favoris et préférences |
+| `PUT /me/sign-in` | appelée par le serveur du front à chaque connexion : crée le profil ou met à jour adresse, nom et `last_login_at`, puis range le service Azure de l'agent (`{ "department": "44EN" }`, `department` de Graph) brut dans `users.service_id` (`null` l'efface) ; 204 |
+| `GET /me/layers` · `POST /me/layers` | couches ajoutées par l'agent (flux WMS, WMTS, XYZ, ou fichier envoyé en GeoJSON WGS 84, 5 Mo et 50 000 objets au plus, rangé en jsonb ; la liste ne donne que l'emprise d'un fichier ; 201 ; 422 au-delà de 50) |
+| `GET /me/layers/{id}/geojson` | GeoJSON d'une couche fichier (404 pour un flux ou la couche d'un autre) |
+| `PATCH` · `DELETE /me/layers/{id}` | renomme et/ou change le style (`style` : `color`, `lineWidth`, `pointRadius`, `labelField`) ; supprime, et retire la couche des favoris et de « Mes couches » (404 pour la couche d'un autre) |
+| `GET /projects` | recherche paginée et triée de l'écran Projets : `{ "items": [...], "count": total }` |
+| `POST /projects/geolocation-statuses` | statut de géolocalisation de chaque affaire demandée (`{ "ids": [...] }`, 1 000 au plus) |
+| `GET /projects/{numéro}` · `GET /projects/{numéro}/surveys` | fiche d'une affaire, avec `SiteCount` (nombre de chantiers : sans chantier, pas de nouveau sondage possible ; absent de la liste) ; ses sondages (150 au plus) |
+| `POST /projects/{numéro}/surveys` | ajout d'un sondage sur le chantier le plus proche (201, 409 s'il existe, 422 sans chantier) |
+| `POST /survey-imports/workbook` | lecture d'un classeur .xlsx, .xlsm (openpyxl) ou .xls (xlrd) déposé (multipart, champ `file`, 10 Mo au plus) pour l'import Excel des sondages : `{ "sheets": [{ "name", "rows", "truncated" }] }`, cellules en texte, 5 000 lignes et 100 colonnes au plus par feuille ; rien n'est enregistré (domaine `survey_imports`) |
+| `PUT /projects/{id base64}` · `PUT /surveys/{id base64}` | position, altitude ou motif de non-géolocalisation |
+| `PATCH /projects/{numéro}/ged-presence` | présence de documents GED déclarée à la main (`{ "IsDocGed": bool }`) : écrit `is_doc_ged`, l'adresse de l'auteur et la date (migration `0006`, ADR-0040 du front) ; 400 corps invalide, 404 affaire inconnue |
+| `GET /city-agencies` · `/codes-metier` · `/project-types` · `/no-geo-project-reasons` · `/no-geo-survey-reasons` | référentiels |
+| `GET /case-detail/{identifiant GED}` · `GET /case-file/{numéro}?file=` | fiche GED d'une affaire ; un de ses fichiers, relayé en flux (502 si la GED est injoignable) |
+| `GET /investigations?projectRef=` | enquêtes d'une affaire, chacune avec ses versions (sans contenu), la plus récente en tête |
+| `GET /investigations/{uuid}` · `GET /investigations/{uuid}/versions/{n}` | dernière version ou version n, avec son contenu (`data`) |
+| `POST /investigations` · `POST /investigations/{uuid}/versions` | premier enregistrement (V1) ; nouvelle version (201) |
+| `PUT /investigations/{uuid}/versions/{n}` · `PATCH /investigations/{uuid}` | écrasement de la dernière version (409 sinon) ; renommage |
+| `GET /saved-page/search?q=&limit=` | recherche d'enquêtes par n° d'affaire ou nom (30 par défaut ; 404 sans résultat) |
+| `GET /parametrage` | message d'accueil, adresse de contact et lien du manuel (dernière version) |
+| `PUT /ajout-statistique-visite` · `POST /add-address-search-tracing` | statistique de visite ; trace d'une recherche d'adresse (habilitation de l'agent sur le département) |
+| `GET /access-limited-zones` · `GET /about` | zones à accès restreint ; adresse de l'agent connecté |
+| `GET /waitingImage/` · `/waitingImage/random` · `POST /waitingImage/upload` · `PUT /waitingImage/{id}/activate` · `deactivate` · `DELETE /waitingImage/{id}` · `GET /file/waitingImages/{nom}` | images d'attente |
+| `GET /reports?projects=N1\|N2` | archive ZIP des rapports des affaires, lus sur le dépôt FTP |
+| `GET` · `POST /api/enquetes/planches` | catalogue ; planches d'une position, interrogées en parallèle (200, ou 207 si l'une échoue) |
+| `GET /infoterre?infoterreUrl=` | fiche Infoterre du BRGM relayée (seuls `infoterre.brgm.fr` et `ficheinfoterre.brgm.fr`) |
+| `GET /api/health` | l'état des connexions aux bases (publique) |
 
 **Requête :**
 
@@ -556,6 +649,87 @@ La documentation interactive de toutes les routes est disponible sur
   6 décimales (environ 11 cm).
 - `has_mesure_pressiometrique` vaut toujours `true` ou `false`, jamais `null`.
 - Une zone sans donnée renvoie une collection vide, pas une erreur.
+
+**Profil (`/me`)** — repris à l'identique du back Symfony (ADR-0034 du front) : mêmes
+routes, mêmes réponses, mêmes codes et messages d'erreur. Les corps ne sont donc pas
+contrôlés par Pydantic (qui répondrait 422) mais par `profile/entities.py`. Une donnée
+refusée répond 400 avec `{ "errors": "<message>" }`, par exemple `theme doit valoir light,
+dark, system.` ou `Identifiant de couche invalide.` Chaque route agit sur le profil de
+l'appelant : un agent ne voit ni ne modifie les favoris d'un autre (404 sur l'adresse d'un
+autre).
+
+**Affaires (`/projects`, `/surveys`, référentiels)** — reprises du back Symfony avec le même
+contrat : champs en PascalCase de l'ancien back Go (`ID`, `NbSurveysGeoloc`, `SystemeGeo`…),
+valeur absente rendue par `""` ou `0`, dates RFC 3339 en UTC. Points à connaître :
+
+- **Statut de géolocalisation** (`GeolocationStatus` : `geolocated`, `to_geolocate`,
+  `surveys_to_geolocate`, `excluded`, `unclassified`) : calculé par `entities.classify`, et
+  traduit en SQL pour le filtre `selectedGeo` (`queries.geolocation_having`). Les deux doivent
+  rester d'accord ; un test le vérifie sur une base réelle, filtre par filtre. Il n'est connu
+  qu'avec le décompte des sondages : il vaut `null` dans la fiche d'une affaire.
+- **Types d'affaire 1 et 2** (linéaire, multi-sites) : jugés sur leurs sondages, pas sur la
+  position de l'affaire.
+- **Filtre par numéro** (`projectId`) : début du numéro, sans tenir compte de la casse ni de la
+  ponctuation (« 95.gt.25 » trouve « 95GT.25.0159 ») ; index d'expression
+  `idx_projects_compact_id` (révision Alembic 0002).
+- **Tri** : liste fermée de colonnes (`sort=number|name|city|client|agency|businessCode`),
+  ordre alphabétique français (`COLLATE "fr-x-icu"`), valeurs absentes en dernier, égalités
+  départagées par numéro.
+- **Identifiants avec « / »** : trois affaires ont un « / » dans leur numéro
+  (`PR.GT01.25.0082 / DE-16511`). Les routes utilisent `{…:path}` pour les accepter ; le back
+  Symfony leur répondait 404.
+- **Repositionner une affaire** déplace tous ses chantiers au même point, marqués fiables
+  (`fiability = 1`). Une position efface le motif de non-géolocalisation. (0, 0) ou une
+  latitude nulle valent « pas de position ».
+- **Pressions et lithologies** des sondages : toujours `[]`, comme dans l'ancien contrat.
+
+**GED (`/case-detail`, `/case-file`)** — `projects/sources.py`, repris de HttpGedGateway du
+back Symfony. La fiche est cherchée par l'identifiant GED de l'affaire (`externe_id`), puis
+demandée à la GED avec le numéro de l'affaire. La réponse de la GED (statut, corps) est
+relayée en flux, avec trois en-têtes seulement : type, nom de fichier, taille. Une seconde
+tentative est faite après une erreur réseau, sauf un nom introuvable dans le DNS ; une
+réponse d'erreur de la GED n'est pas rejouée. Fiche : 3 s de silence au plus par tentative ;
+fichier : 60 s. GED injoignable ou non configurée : 502 `{ "error": "ged injoignable" }`, sans
+l'adresse interne. Le corps est demandé sans compression (`Accept-Encoding: identity`) pour
+que la taille relayée reste juste.
+
+**Enquêtes enregistrées (`/investigations`)** — ADR-0032 du front, reprises du back Symfony :
+
+- une enquête (`saved_pages`) a des versions numérotées par enquête (`saved_page_versions`) ;
+  seule la dernière s'écrase. `saved_pages.data` reprend toujours le contenu de la dernière
+  version ;
+- l'auteur d'une version est l'agent connecté (`current_profile`) : son identifiant, vidé si
+  le compte est supprimé, et son nom, copié ;
+- chaque écriture verrouille l'enquête (`SELECT … FOR UPDATE`) : deux enregistrements
+  simultanés ne prennent jamais le même numéro (un test lance 12 enregistrements en
+  parallèle) ;
+- `data` est un texte ; envoyé en objet ou en liste JSON, il est enregistré en texte JSON ;
+- un identifiant ou un numéro de version mal formé répond 404, comme une enquête inconnue.
+
+Les routes `/saved-page/create`, `/saved-page/update/…`, `/saved-page/{uuid}` et
+`/saved-page/user/…` de l'ancien front ne sont pas reprises (ADR-0034) ; seule la recherche
+`/saved-page/search` l'est, car le nouveau front s'en sert.
+
+**Socle, rapports, enquête documentaire** — repris du back Symfony (lot 5 de l'ADR-0034), même
+contrat. `/maj-parametrage` n'est pas reprise (ancien front seulement). À connaître :
+
+- **Images d'attente** : fichiers dans `WAITING_IMAGES_DIR` (`uploads/waitingImages`, monté dans
+  le conteneur, non versionné). Une image est reconnue à ses premiers octets (JPEG, PNG, GIF,
+  WebP) ; un SVG ou un autre fichier est refusé. Les fichiers sont servis en téléchargement,
+  avec `X-Content-Type-Options: nosniff`, et le nom demandé est réduit à son dernier segment.
+- **Habilitation d'une recherche d'adresse** : l'agent (table `email_services`) est habilité si
+  son agence couvre le département (`service_departments`) ou a un accès général
+  (`services.full_access`).
+- **Rapports** : chemin sur le dépôt `agence/année/numéro` en minuscules ; un numéro qui
+  permettrait de sortir du dépôt est refusé (400). Dépôt injoignable ou non configuré : 502
+  (Symfony répondait 500).
+- **Planches** : interrogées en parallèle (`asyncio`) ; chacune a sa durée maximale (8 ou 10 s),
+  l'ensemble 12 s. Une planche inconnue ou sans source configurée est `unavailable` ; lente, en
+  erreur (429, 5xx) ou illisible, elle est `degraded`. Sources : Géorisques
+  (`GEORISQUES_BASE_URI`) et l'ancien apisolscore (`PLANCHES_APISOLSCORE_BASE_URI`).
+- **Infoterre** : seules les adresses du BRGM sont relayées (jamais une adresse interne : GED,
+  base, métadonnées de l'hébergeur) ; le contenu est neutralisé (`Content-Security-Policy:
+  sandbox; default-src 'none'`, `nosniff`).
 
 **Parcelle cadastrale (France)** — reprise de `/cadastre_fr` de l'ancien apisolscore, qui
 relayait déjà l'API Carto de l'IGN (`apicarto.ign.fr/api/cadastre/parcelle`) :
@@ -599,6 +773,19 @@ démarrage**, avec un message qui nomme la variable en cause.
 | `DB_SOLSCORE_NAME` | oui | nom de la base |
 | `DB_SOLSCORE_USER` | oui | utilisateur de la base |
 | `DB_SOLSCORE_PASSWORD` | oui | mot de passe (traité comme un secret, jamais affiché) |
+| `DB_REFONTE_HOST` | oui | adresse de la base métier (`host.docker.internal` en local : port publié par le conteneur `refonte_postgis`) |
+| `DB_REFONTE_PORT` | non (5432) | port de la base métier (5434 en local) |
+| `DB_REFONTE_NAME` | oui | nom de la base métier (`fondasol`) |
+| `DB_REFONTE_USER` | oui | utilisateur de la base métier |
+| `DB_REFONTE_PASSWORD` | oui | mot de passe de la base métier |
+| `DB_REFONTE_TEST_NAME` | non (`fondasol_fastapi_test`) | base des tests, sur le même serveur ; son nom doit finir par `_test` |
+| `WAITING_IMAGES_DIR` | non (`uploads/waitingImages`) | dossier des images d'attente |
+| `FTP_HOST` · `FTP_PORT` (21) · `FTP_USERNAME` · `FTP_PASSWORD` · `FTP_BASE_PATH` | non | dépôt FTP des rapports archivés ; sans hôte, `/reports` répond 502 |
+| `GEORISQUES_BASE_URI` | non (`https://www.georisques.gouv.fr/api/v1`) | API publique Géorisques (planches) |
+| `PLANCHES_APISOLSCORE_BASE_URI` | non | ancien apisolscore, source des planches catnat, ppr, geol… ; sans elle, ces planches sont `unavailable` |
+| `GED_BASE_URI` | non | adresse de l'API de la GED (fiche des affaires) ; sans elle, `/case-detail` répond 502 |
+| `GED_FILES_BASE_URI` | non | adresse de téléchargement des fichiers de la GED |
+| `GED_USERNAME` · `GED_PASSWORD` | non | compte de la GED (Basic Auth) ; mêmes valeurs que le back Symfony |
 | `DB_AUDIT_HOST` | oui | adresse de la base d'audit MySQL (`mysql` avec docker compose) |
 | `DB_AUDIT_PORT` | non (3306) | port de la base d'audit |
 | `DB_AUDIT_NAME` | oui | nom de la base d'audit (`solscore`) |
@@ -773,12 +960,19 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -q tests"
 ```
 
+Les tests qui écrivent demandent la fixture `refonte_database` (`tests/conftest.py`). Elle
+vise la base `DB_REFONTE_TEST_NAME` du même serveur, jamais `DB_REFONTE_NAME`. Elle la crée
+si besoin et y rejoue les migrations une fois par session. Ensuite, elle vide les tables
+avant chaque test.
+
 Le dossier `tests/` reprend l'arborescence d'`app/`. Le détail de chaque test est dans
 le [README](../README.md).
 
 | Fichier | Ce qu'il vérifie | Dépend de |
 |---|---|---|
-| `tests/core/test_auth.py` | acceptation et refus des jetons ; règles du jeton de développement | rien (faux jetons signés par une clé générée) |
+| `tests/core/test_auth.py` | acceptation et refus des jetons ; identité (oid, nom) ; règles du jeton de développement | rien (faux jetons signés par une clé générée) |
+| `tests/core/test_profile.py` | création du profil à la première requête, mise à jour à la connexion, rattachement d'un profil importé, refus sans oid | la base de test |
+| `tests/core/test_errors.py` | code HTTP et corps de chaque erreur métier | rien |
 | `tests/domains/map/test_routes.py` | GeoJSON bien formé, points dans l'emprise, propriétés, emprises invalides | la base d'apisolscore, en lecture |
 | `tests/domains/france/land_registry/` | référence complétée par des zéros, surfaces, conversion de l'IGN ; route : parcelle trouvée, 404, 502, 422, 401 | rien (IGN simulé) |
 
@@ -794,4 +988,7 @@ le [README](../README.md).
 | **Table `site`** | aucun index : chaque requête la parcourt en entier (150 000 lignes, rapide aux volumes actuels) | index sur (latitude, longitude), à voir avec l'équipe d'apisolscore |
 | **`position`** | acceptée dans les requêtes de `map/` mais jamais utilisée (héritée du code d'origine) | l'utiliser (tri par proximité) ou la retirer, en accord avec le front |
 | **Coordonnées à zéro** | des sites et sondages sont enregistrés en (0, 0) dans la base | question de qualité des données, côté apisolscore |
+| **TLS vers la GED** | vérification du certificat désactivée (`verify=False`), comme dans le back Go puis Symfony : le certificat du serveur Talend n'est pas signé par une autorité connue du conteneur. Un intermédiaire sur le réseau pourrait se faire passer pour la GED | installer l'autorité interne de Fondasol dans l'image, puis retirer `verify=False` |
+| **Adresse de la GED en local** | `vm-azu-talend` a deux adresses dans le DNS (`10.1.0.14` et `172.19.4.152`) ; sur un poste où un réseau Docker occupe `172.19.0.0/16`, la seconde n'aboutit jamais (502 une fois sur deux) | `docker-compose.override.yml`, non versionné, fixe `vm-azu-talend` sur `10.1.0.14` (`extra_hosts`). Recréer le conteneur après modification ; à retirer si l'adresse de la GED change |
+| **Durée totale d'un appel à la GED** | httpx limite le silence entre deux morceaux, pas la durée totale (Symfony coupait à 60 s) | un téléchargement très lent mais continu n'est pas interrompu |
 | **Migration des URL** | les routes par pays (`/fr/natural-hazards/…`) différeront de celles d'apisolscore (`/fr/RisquesNaturels/Alea/…`) | garder temporairement les anciennes URL en parallèle, le temps de migrer le front |

@@ -1,3 +1,6 @@
+# Regroupe les thèmes de la France sous le préfixe /fr. Branché et protégé par le jeton dans main.py.
+# Ajouter un thème : importer son routeur ici et l'inclure ci-dessous.
+
 from fastapi import APIRouter
 
 from app.domains.france.environment.routes import router as environment_router
@@ -10,6 +13,7 @@ from app.domains.france.weather.routes import router as weather_router
 
 router = APIRouter(prefix="/fr")
 
+# Chaque thème ajoute son propre préfixe : /fr/geology/…, /fr/land-registry/…
 router.include_router(environment_router)
 router.include_router(geology_router)
 router.include_router(hydrogeology_router)

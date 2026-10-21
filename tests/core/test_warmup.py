@@ -23,6 +23,7 @@ def test_the_warm_up_fetches_the_azure_keys_and_opens_the_database_connections(m
     assert CountingJwksClient.calls == 1
     assert warnings == []
     assert warmup.apisolscore_engine.pool.checkedin() >= 2
+    assert warmup.refonte_engine.pool.checkedin() >= 1
 
 
 def test_an_unreachable_azure_does_not_prevent_startup(monkeypatch):

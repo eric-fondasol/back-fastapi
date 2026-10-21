@@ -3,3 +3,5 @@ __pycache__/
 *.py[cod]
 /.venv/
 /logs/
+/docker-compose.override.yml
+/uploads/

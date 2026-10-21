@@ -14,8 +14,11 @@ COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --no-deps .
 
+COPY alembic.ini ./
+COPY migrations ./migrations
+
 RUN useradd --create-home --uid 1000 solscore \
-    && mkdir logs && chown solscore logs
+    && mkdir logs uploads && chown solscore logs uploads
 USER solscore
 
 EXPOSE 8000

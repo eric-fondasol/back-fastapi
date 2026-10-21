@@ -12,6 +12,10 @@ dependencies = [
     "PyJWT[crypto]",
     "httpx",
     "orjson",
+    "alembic",
+    "python-multipart",
+    "openpyxl",
+    "xlrd",
 ]
 
 [project.optional-dependencies]
