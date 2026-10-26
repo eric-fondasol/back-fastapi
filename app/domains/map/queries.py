@@ -29,12 +29,15 @@ SURVEYS = """
       AND localisation_latitude_ywgs84 IS NOT NULL
 """
 
-# COALESCE : has_mesure_pressiometrique vaut toujours true ou false pour le front, jamais null.
+# COALESCE : les indicateurs de nature valent toujours true ou false pour le front, jamais null.
+# Le front en tire le symbole du sondage (pressiométrique, pénétrométrique, autre).
 SURVEY_PROPERTIES = """,
     id::text AS id,
     nom,
     site_uuid::text AS site_uuid,
-    COALESCE(has_mesure_pressiometrique, false) AS has_mesure_pressiometrique
+    COALESCE(has_mesure_pressiometrique, false) AS has_mesure_pressiometrique,
+    COALESCE(has_essai_penetro_dynamique, false) AS has_essai_penetro_dynamique,
+    COALESCE(has_lithologie, false) AS has_lithologie
 """
 
 

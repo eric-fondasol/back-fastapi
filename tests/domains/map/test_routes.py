@@ -11,7 +11,14 @@ EXPECTED_PROPERTIES = {
     "/searchSitesByArea": set(),
     "/searchSitesByAreaDetails": {"uuid", "affaire_id", "affaire_numero", "affaire_nom"},
     "/searchSurveysByArea": set(),
-    "/searchSurveysByAreaDetails": {"id", "nom", "site_uuid", "has_mesure_pressiometrique"},
+    "/searchSurveysByAreaDetails": {
+        "id",
+        "nom",
+        "site_uuid",
+        "has_mesure_pressiometrique",
+        "has_essai_penetro_dynamique",
+        "has_lithologie",
+    },
 }
 
 
@@ -52,10 +59,11 @@ def test_an_area_returns_a_geojson_collection_of_points_within_bounds(client, ro
         assert set(feature["properties"]) == EXPECTED_PROPERTIES[route]
 
 
-def test_the_pressiometric_flag_is_always_a_boolean(client):
+@pytest.mark.parametrize("flag", ["has_mesure_pressiometrique", "has_essai_penetro_dynamique", "has_lithologie"])
+def test_the_survey_kind_flags_are_always_booleans(client, flag):
     features = search(client, "/searchSurveysByAreaDetails", PARIS).json()["features"]
 
-    assert all(isinstance(feature["properties"]["has_mesure_pressiometrique"], bool) for feature in features)
+    assert all(isinstance(feature["properties"][flag], bool) for feature in features)
 
 
 @pytest.mark.parametrize("route", EXPECTED_PROPERTIES)

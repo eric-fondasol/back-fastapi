@@ -483,7 +483,7 @@ Garde-fous :
 |---|---|
 | `public.site` | `uuid`, `latitude`, `longitude`, `affaire_id` |
 | `public.affaire` | `id`, `numero`, `nom` |
-| `public.sondage` | `id`, `nom`, `site_uuid`, `localisation_longitude_xwgs84`, `localisation_latitude_ywgs84`, `has_mesure_pressiometrique` |
+| `public.sondage` | `id`, `nom`, `site_uuid`, `localisation_longitude_xwgs84`, `localisation_latitude_ywgs84`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` |
 
 - **La base renvoie des lignes simples, l'API assemble le GeoJSON.** Chaque requête
   renvoie une ligne par point : `longitude`, `latitude` (déjà arrondies à 6 décimales),
@@ -582,7 +582,7 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /searchSitesByArea` | les sites de l'emprise, positions seules |
 | `POST /searchSitesByAreaDetails` | les sites, avec `uuid`, `affaire_id`, `affaire_numero`, `affaire_nom` |
 | `POST /searchSurveysByArea` | les sondages de l'emprise, positions seules |
-| `POST /searchSurveysByAreaDetails` | les sondages, avec `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique` |
+| `POST /searchSurveysByAreaDetails` | les sondages, avec `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` |
 | `POST /fr/land-registry/parcels` | une parcelle du cadastre français (GeoJSON), lue sur l'API Carto de l'IGN |
 | `GET /me` | le profil de l'agent connecté (`id`, `email`, `displayName`), créé ou mis à jour |
 | `GET` · `PATCH /me/preferences` | langue, thème, territoire par défaut, style de carte, « Mes couches », `extra` |
@@ -640,7 +640,9 @@ La documentation interactive de toutes les routes est disponible sur
         "id": "3848579c-…",
         "nom": "IP.17.0170_TM6",
         "site_uuid": "5784351d-…",
-        "has_mesure_pressiometrique": false
+        "has_mesure_pressiometrique": false,
+        "has_essai_penetro_dynamique": true,
+        "has_lithologie": false
       }
     }
   ]
@@ -649,7 +651,9 @@ La documentation interactive de toutes les routes est disponible sur
 
 - Les coordonnées sont dans l'ordre GeoJSON : **longitude puis latitude**, arrondies à
   6 décimales (environ 11 cm).
-- `has_mesure_pressiometrique` vaut toujours `true` ou `false`, jamais `null`.
+- `has_mesure_pressiometrique`, `has_essai_penetro_dynamique` et `has_lithologie` valent toujours
+  `true` ou `false`, jamais `null` (les deux derniers ajoutés le 26/10/2026, pour les symboles des
+  sondages du front).
 - Une zone sans donnée renvoie une collection vide, pas une erreur.
 
 **Profil (`/me`)** — repris à l'identique du back Symfony (ADR-0034 du front) : mêmes

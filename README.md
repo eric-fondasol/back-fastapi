@@ -108,7 +108,7 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **464 tests**, dans vingt-cinq
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **467 tests**, dans vingt-cinq
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
@@ -120,7 +120,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/core/test_warmup.py` | 2 | la base d'apisolscore et la base métier |
 | `tests/domains/france/land_registry/test_services.py` | 4 | rien |
 | `tests/domains/france/land_registry/test_routes.py` | 9 | rien (IGN simulé) |
-| `tests/domains/map/test_routes.py` | 15 | la base d'apisolscore |
+| `tests/domains/map/test_routes.py` | 17 | la base d'apisolscore |
 | `tests/domains/profile/test_entities.py` | 24 | rien |
 | `tests/domains/profile/test_routes.py` | 22 | la base métier de test |
 | `tests/domains/projects/test_entities.py` | 50 | rien |
@@ -255,7 +255,7 @@ polluent ni `audit_log` ni `logs/`.
 Dans les autres tests, le préchauffage est désactivé (`tests/conftest.py`) pour ne pas
 appeler Azure.
 
-### `tests/domains/map/test_routes.py` — les routes de la carte (15 tests)
+### `tests/domains/map/test_routes.py` — les routes de la carte (17 tests)
 
 Ces tests interrogent **la vraie base d'apisolscore**, en lecture seule.
 L'authentification y est remplacée par un utilisateur de test : elle est déjà couverte
@@ -263,8 +263,8 @@ par le fichier précédent.
 
 | Test | Ce qu'il vérifie |
 |---|---|
-| `test_an_area_returns_a_geojson_collection_of_points_within_bounds` (×4) | sur un secteur de Paris, chaque route renvoie un GeoJSON bien formé, au moins un point, tous les points dans l'emprise demandée, des coordonnées à 6 décimales au plus, et exactement les propriétés attendues (aucune pour les routes simples ; `uuid`, `affaire_id`, `affaire_numero`, `affaire_nom` ou `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique` pour les routes détaillées) |
-| `test_the_pressiometric_flag_is_always_a_boolean` | `has_mesure_pressiometrique` vaut toujours `true` ou `false`, jamais `null` |
+| `test_an_area_returns_a_geojson_collection_of_points_within_bounds` (×4) | sur un secteur de Paris, chaque route renvoie un GeoJSON bien formé, au moins un point, tous les points dans l'emprise demandée, des coordonnées à 6 décimales au plus, et exactement les propriétés attendues (aucune pour les routes simples ; `uuid`, `affaire_id`, `affaire_numero`, `affaire_nom` ou `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` pour les routes détaillées) |
+| `test_the_survey_kind_flags_are_always_booleans` (×3) | `has_mesure_pressiometrique`, `has_essai_penetro_dynamique` et `has_lithologie` valent toujours `true` ou `false`, jamais `null` |
 | `test_an_area_without_data_returns_an_empty_collection` (×4) | une zone en plein Atlantique renvoie une collection vide (200), pas une erreur |
 | `test_invalid_bounds_are_rejected` (×5) | refus (422) de latitudes inversées, de longitudes inversées, d'une latitude supérieure à 90, d'une longitude inférieure à -180, d'une emprise incomplète |
 | `test_a_request_without_bounds_is_rejected` | une requête sans emprise est refusée (422) |
