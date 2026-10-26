@@ -5,7 +5,8 @@ from decimal import Decimal
 from typing import Any
 
 from app.database.connection import refonte_transaction
-from app.domains.layer_catalog import queries
+from app.domains.layer_catalog import queries, sources
+from app.domains.layer_catalog.geometry import Bbox, light_features
 
 
 def _zoom(value: Decimal | None) -> float | None:
@@ -42,4 +43,30 @@ def catalog() -> dict[str, Any]:
     return {
         "categories": [{"code": row["code"], "label": _localized(row["label_fr"], row["label_en"])} for row in categories],
         "layers": [_layer_json(row) for row in layers],
+    }
+
+
+class UnknownFeatureLayer(Exception):
+    pass
+
+
+# Objets d'une couche vectorielle du catalogue dans l'emprise demandée, allégés pour le zoom du front.
+# En deçà du zoom minimal de la couche, rien n'est demandé au service : le front ne l'affiche pas.
+# truncated signale qu'il y avait davantage d'objets que le plafond (sources.MAX_FEATURES).
+def feature_collection(code: str, bbox: Bbox, zoom: int) -> dict[str, Any]:
+    with refonte_transaction() as connection:
+        layer = queries.feature_layer(connection, code)
+    if layer is None:
+        raise UnknownFeatureLayer(code)
+
+    min_zoom = _zoom(layer["min_zoom"])
+    if min_zoom is not None and zoom < min_zoom:
+        return {"type": "FeatureCollection", "features": [], "truncated": False}
+
+    fetch = sources.wfs_features if layer["kind"] == "wfs" else sources.geojson_features
+    found = fetch(layer["url"], layer["params"] or {}, bbox)
+    return {
+        "type": "FeatureCollection",
+        "features": light_features(found, bbox, zoom),
+        "truncated": len(found) >= sources.MAX_FEATURES,
     }

@@ -139,3 +139,81 @@ def test_a_request_without_token_is_refused(client):
     app.dependency_overrides.clear()
 
     assert client.get(ROUTE).status_code == 401
+
+
+FRANCE_MIGRATION = Path(__file__).parents[3] / "migrations" / "versions" / "0008_layer_catalog_france.py"
+
+
+def france_migration():
+    spec = importlib.util.spec_from_file_location("layer_catalog_france_migration", FRANCE_MIGRATION)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def seed_both(engine):
+    with engine.begin() as connection:
+        migration().seed(connection)
+        france_migration().seed(connection)
+
+
+def test_the_france_migration_adds_its_layers_after_the_existing_ones(client, refonte_database):
+    seed_both(refonte_database)
+
+    catalog = client.get(ROUTE).json()
+
+    assert [category["code"] for category in catalog["categories"]] == [
+        "geologie",
+        "cadastre",
+        "topographie",
+        "eau-surface",
+        "eau-souterraine",
+        "geothermie",
+        "environnement",
+    ]
+    assert len(catalog["layers"]) == 6 + 32
+    geologie = [layer["code"] for layer in catalog["layers"] if layer["category"] == "geologie"]
+    assert geologie == [
+        "fr-geologie",
+        "lu-geologie",
+        "fr-brgm-bss-tous-ouvrages",
+        "fr-brgm-carte-geol-50k-imprimee",
+        "fr-brgm-carte-geol-50k-harmonisee",
+    ]
+    by_code = {layer["code"]: layer for layer in catalog["layers"]}
+    assert by_code["fr-brgm-carte-geol-50k-imprimee"]["params"] == {"layers": "SCAN_GEOL50", "format": "image/png", "version": "1.1.1"}
+    assert by_code["fr-brgm-carte-geol-50k-imprimee"]["legendUrl"] == (
+        "https://mapsref.brgm.fr/wxs/referentiel/geologie?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetLegendGraphic"
+        "&FORMAT=image/png&LAYER=SCAN_GEOL50&SLD_VERSION=1.1.0"
+    )
+    assert by_code["fr-ign-carte-etat-major-40k"]["params"] == {
+        "layer": "GEOGRAPHICALGRIDSYSTEMS.ETATMAJOR40",
+        "style": "normal",
+        "tileMatrixSet": "PM_6_15",
+        "format": "image/jpeg",
+    }
+    assert (by_code["fr-ign-carte-etat-major-40k"]["minZoom"], by_code["fr-ign-carte-etat-major-40k"]["maxZoom"]) == (6.0, 15.0)
+    assert by_code["fr-brgm-gmi-ouvert-50-100"]["description"] == {
+        "fr": "Zonage réglementaire GMI, nappe 50-100 m.",
+        "en": "Minor geothermal regulatory zoning, open loop 50-100 m.",
+    }
+
+
+def test_the_france_migration_only_adds_layers_the_front_can_display(client, refonte_database):
+    seed_both(refonte_database)
+
+    added = [layer for layer in client.get(ROUTE).json()["layers"] if layer["code"] in {l["code"] for l in france_migration().LAYERS}]
+
+    assert len(added) == 32
+    assert {layer["kind"] for layer in added} == {"wms", "wmts"}
+    assert all(layer["country"] == "fr" and layer["renderer"] is None for layer in added)
+    assert all("apikey" not in layer["params"] and "/private/" not in layer["url"] for layer in added)
+    assert all(layer["params"].get("layers") or layer["params"].get("layer") for layer in added)
+
+
+def test_the_france_seed_can_run_twice_without_duplicates(client, refonte_database):
+    seed_both(refonte_database)
+    with refonte_database.begin() as connection:
+        france_migration().seed(connection)
+
+    assert len(client.get(ROUTE).json()["layers"]) == 38

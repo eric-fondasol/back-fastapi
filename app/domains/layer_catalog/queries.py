@@ -25,3 +25,19 @@ def enabled_layers(connection: Connection) -> list[dict[str, Any]]:
         )
     )
     return [dict(row) for row in rows.mappings()]
+
+
+# Couche vectorielle activée (WFS ou GeoJSON) : de quoi interroger son service. None si le code est
+# inconnu, désactivé, ou désigne une couche d'images (servie directement au navigateur).
+def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
+    row = connection.execute(
+        text(
+            """
+            SELECT code, kind, url, params, min_zoom, max_zoom
+            FROM catalog_layers
+            WHERE code = :code AND enabled AND kind IN ('wfs', 'geojson')
+            """
+        ),
+        {"code": code},
+    ).mappings().first()
+    return None if row is None else dict(row)
