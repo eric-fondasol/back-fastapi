@@ -1,0 +1,30 @@
+name: Deploiement recette
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Redeployer meme si la version est deja en place"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-recette-back
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows, solscore-recette]
+    timeout-minutes: 30
+    steps:
+      - name: Deployer sur la VM de recette
+        shell: powershell
+        run: |
+          if ('${{ inputs.force }}' -eq 'true') {
+            & C:\apps\solscore\deploy-back.ps1 -Force
+          } else {
+            & C:\apps\solscore\deploy-back.ps1
+          }
+          exit $LASTEXITCODE
