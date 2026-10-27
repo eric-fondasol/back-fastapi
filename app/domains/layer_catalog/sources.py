@@ -80,6 +80,7 @@ class TileNotFound(Exception):
     pass
 
 
+
 # Tuile WMTS (GetTile, KVP) d'un service privé, demandée avec la clé d'API. Une tuile hors de la zone
 # couverte ou du niveau de zoom servi (404 ou 400 du service) est TileNotFound ; un refus de la clé
 # (401, 403) ou une panne, FeatureServiceUnavailable.

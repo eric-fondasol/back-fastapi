@@ -57,7 +57,6 @@ def layer_features(code: str, bbox: str = Query(...), zoom: int = Query(..., ge=
 # Une tuile change rarement : le navigateur la garde un jour, sans la partager (réponse authentifiée).
 TILE_CACHE_CONTROL = "private, max-age=86400"
 
-
 # Tuile d'une couche relayée (params.relayed, ADR-0046 du front) : le back la demande au service privé
 # avec sa clé d'API, que le navigateur ne voit jamais. Image du service, ou 404 hors couverture.
 @router.get("/layer-catalog/{code}/tiles/{z}/{x}/{y}")
