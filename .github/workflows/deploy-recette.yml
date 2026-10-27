@@ -2,7 +2,7 @@ name: Deploiement recette
 
 on:
   push:
-    branches: [main]
+    branches: [recette]
   workflow_dispatch:
     inputs:
       force:
@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/recette'
     runs-on: [self-hosted, windows, solscore-recette]
     timeout-minutes: 30
     steps:
