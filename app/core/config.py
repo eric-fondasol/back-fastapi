@@ -58,6 +58,14 @@ class Config(BaseSettings):
     # couches relayées disparaissent du catalogue et leurs tuiles répondent 404.
     ign_private_api_key: SecretStr | None = None
 
+    # Dynamics NAV (Navision) : devis lus par son API OData V4, en Basic Auth, pour la recherche par
+    # n° de devis de la carte (GET /quotes/{numéro}). Adresse jusqu'à la société, sans la page :
+    # https://nav.fondasol.fr:7048/FONDASOL_PROD_WS/ODataV4/Company('FONDASOL'). Facultatif : sans
+    # elle, l'API démarre et la route répond 502.
+    nav_odata_base_uri: str | None = None
+    nav_username: str | None = None
+    nav_password: SecretStr | None = None
+
     # Base MySQL d'audit (table audit_log).
     db_audit_host: str
     db_audit_port: int = 3306

@@ -16,6 +16,7 @@ from app.domains.investigations.routes import router as investigations_router
 from app.domains.map.routes import router as map_router
 from app.domains.profile.routes import router as profile_router
 from app.domains.projects.routes import router as projects_router
+from app.domains.quotes.routes import router as quotes_router
 from app.domains.reports.routes import router as reports_router
 from app.domains.socle.routes import router as socle_router
 from app.domains.survey_imports.routes import router as survey_imports_router
@@ -55,6 +56,7 @@ app.include_router(health.router)
 app.include_router(map_router, dependencies=protected)
 app.include_router(profile_router, dependencies=protected)
 app.include_router(projects_router, dependencies=protected)
+app.include_router(quotes_router, dependencies=protected)
 app.include_router(survey_imports_router, dependencies=protected)
 app.include_router(layer_catalog_router, dependencies=protected)
 app.include_router(investigations_router, dependencies=protected)

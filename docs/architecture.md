@@ -103,6 +103,7 @@ back-fastapi/
 │   └── domains/                         métier
 │       ├── profile/                     profil de l'agent connecté : préférences et favoris → /me/…
 │       ├── projects/                    affaires, sondages, repositionnement, référentiels, GED → /projects/…
+│       ├── quotes/                      devis lus dans Dynamics NAV (OData) → /quotes/{numéro}
 │       ├── investigations/              enquêtes enregistrées et leurs versions → /investigations/…
 │       ├── socle/                       paramétrage, statistiques, zones restreintes, images d'attente
 │       ├── reports/                     archive ZIP des rapports, lus sur le dépôt FTP → /reports
@@ -607,6 +608,7 @@ La documentation interactive de toutes les routes est disponible sur
 | `GET /layer-catalog/{code}/tiles/{z}/{x}/{y}` | tuile d'une couche WMTS à `params.relayed` (ADR-0046 du front ; SCAN 25, migration `0010`) : demandée au service privé avec `IGN_PRIVATE_API_KEY`, renvoyée telle quelle avec `Cache-Control: private, max-age=86400` ; 400 hors de la grille, 404 tuile absente (hors de la zone couverte), 404 couche non relayée ou clé absente, 502 clé refusée ou service en défaut (sans jamais renvoyer la clé) ; non tracée dans `audit_log` |
 | `PATCH /projects/{numéro}/ged-presence` | présence de documents GED déclarée à la main (`{ "IsDocGed": bool }`) : écrit `is_doc_ged`, l'adresse de l'auteur et la date (migration `0006`, ADR-0040 du front) ; 400 corps invalide, 404 affaire inconnue |
 | `GET /city-agencies` · `/codes-metier` · `/project-types` · `/no-geo-project-reasons` · `/no-geo-survey-reasons` | référentiels |
+| `GET /quotes/{numéro}` | devis lu dans Dynamics NAV (`FDS_API_Devis_RapportAutomatique`, OData V4, Basic Auth, `$filter=No eq '…'`, champs utiles seulement par `$select`) pour la recherche par n° de devis de la carte : `{ number, project_number, description, address, post_code, city, country_code, position }` ; `project_number` sans le préfixe « PR. » de NAV (Solscore enregistre `31GT.26.0134`, NAV `PR.31GT.26.0134`) ; `position` = GPS de l'adresse de livraison, `null` quand NAV donne 0, 0 ; numéro mis en majuscules, 422 s'il contient autre chose que lettres, chiffres, points et tirets (rien ne sort du filtre OData), 404 inconnu, 502 NAV injoignable, identifiants refusés ou variables `NAV_*` absentes |
 | `GET /case-detail/{identifiant GED}` · `GET /case-file/{numéro}?file=` | fiche GED d'une affaire ; un de ses fichiers, relayé en flux (502 si la GED est injoignable) |
 | `GET /investigations?projectRef=` | enquêtes d'une affaire, chacune avec ses versions (sans contenu), la plus récente en tête |
 | `GET /investigations/{uuid}` · `GET /investigations/{uuid}/versions/{n}` | dernière version ou version n, avec son contenu (`data`) |
@@ -793,6 +795,8 @@ démarrage**, avec un message qui nomme la variable en cause.
 | `GEORISQUES_BASE_URI` | non (`https://www.georisques.gouv.fr/api/v1`) | API publique Géorisques (planches) |
 | `PLANCHES_APISOLSCORE_BASE_URI` | non | ancien apisolscore, source des planches catnat, ppr, geol… ; sans elle, ces planches sont `unavailable` |
 | `IGN_PRIVATE_API_KEY` | non | clé de la Géoplateforme pour ses services privés (SCAN 25), ajoutée aux tuiles relayées et jamais renvoyée au front ; sans elle, les couches `relayed` sortent du catalogue et leurs tuiles répondent 404 |
+| `NAV_ODATA_BASE_URI` | non | adresse OData V4 de Dynamics NAV jusqu'à la société (`https://nav.fondasol.fr:7048/FONDASOL_PROD_WS/ODataV4/Company('FONDASOL')`) ; sans elle, `/quotes/…` répond 502 |
+| `NAV_USERNAME` · `NAV_PASSWORD` | non | compte NAV (Basic Auth) de la recherche de devis ; jamais envoyé au front |
 | `GED_BASE_URI` | non | adresse de l'API de la GED (fiche des affaires) ; sans elle, `/case-detail` répond 502 |
 | `GED_FILES_BASE_URI` | non | adresse de téléchargement des fichiers de la GED |
 | `GED_USERNAME` · `GED_PASSWORD` | non | compte de la GED (Basic Auth) ; mêmes valeurs que le back Symfony |
