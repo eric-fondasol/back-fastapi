@@ -53,6 +53,11 @@ class Config(BaseSettings):
     georisques_base_uri: str = "https://www.georisques.gouv.fr/api/v1"
     planches_apisolscore_base_uri: str | None = None
 
+    # Clé d'API de la Géoplateforme pour ses services privés (SCAN 25). Jamais envoyée au navigateur :
+    # le back relaie les tuiles (GET /layer-catalog/{code}/tiles/…). Facultative : sans elle, les
+    # couches relayées disparaissent du catalogue et leurs tuiles répondent 404.
+    ign_private_api_key: SecretStr | None = None
+
     # Base MySQL d'audit (table audit_log).
     db_audit_host: str
     db_audit_port: int = 3306

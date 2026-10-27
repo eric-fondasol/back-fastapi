@@ -108,13 +108,13 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **467 tests**, dans vingt-cinq
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **483 tests**, dans vingt-six
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
 |---|---|---|
 | `tests/core/test_auth.py` | 21 | rien |
-| `tests/core/test_audit.py` | 9 | la base d'apisolscore et la base d'audit |
+| `tests/core/test_audit.py` | 10 | la base d'apisolscore et la base d'audit |
 | `tests/core/test_errors.py` | 6 | rien |
 | `tests/core/test_profile.py` | 7 | la base métier de test |
 | `tests/core/test_warmup.py` | 2 | la base d'apisolscore et la base métier |
@@ -129,6 +129,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/domains/projects/test_ged.py` | 14 | la base métier de test (GED simulée) |
 | `tests/domains/layer_catalog/test_routes.py` | 12 | base de test (migrations `0007` et `0008` rejouées par leur fonction `seed`) |
 | `tests/domains/layer_catalog/test_features.py` | 16 | base de test (migrations `0007` à `0009` rejouées ; services WFS et Hub'Eau simulés) |
+| `tests/domains/layer_catalog/test_tiles.py` | 15 | base de test (migrations `0007` à `0010` rejouées ; Géoplateforme simulée, clé de test) |
 | `tests/domains/layer_catalog/test_geometry.py` | 8 | rien |
 | `tests/domains/layer_catalog/test_gml.py` | 5 | rien |
 | `tests/domains/survey_imports/test_routes.py` | 13 | rien (classeurs .xlsx créés par le test ; .xls dans `fixtures/`, généré par `make_sondages_xls.py`) |
@@ -229,7 +230,7 @@ budget global sont abandonnées.
 | `test_a_domain_error_becomes_its_http_status_with_the_symfony_body` (×5) | chaque erreur donne son code (400, 403, 404, 409, 422) et `{ "errors": message }` |
 | `test_the_api_converts_domain_errors` | le gestionnaire est branché sur l'API |
 
-### `tests/core/test_audit.py` — le journal et l'audit (9 tests)
+### `tests/core/test_audit.py` — le journal et l'audit (10 tests)
 
 Pendant les tests, l'écriture en base d'audit est remplacée par une liste en mémoire
 (`tests/conftest.py`) et le journal va dans un dossier temporaire : les tests ne

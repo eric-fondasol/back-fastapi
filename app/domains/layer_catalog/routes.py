@@ -3,11 +3,11 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query, Response
 
 from app.domains.layer_catalog import services
 from app.domains.layer_catalog.geometry import Bbox
-from app.domains.layer_catalog.sources import FeatureServiceUnavailable
+from app.domains.layer_catalog.sources import FeatureServiceUnavailable, TileNotFound
 
 router = APIRouter(tags=["Layer catalog"])
 
@@ -52,3 +52,24 @@ def layer_features(code: str, bbox: str = Query(...), zoom: int = Query(..., ge=
     except FeatureServiceUnavailable as error:
         # 502 : c'est le service de la couche qui est en défaut, pas la demande.
         raise HTTPException(status_code=502, detail=f"Service de la couche {code} injoignable") from error
+
+
+# Une tuile change rarement : le navigateur la garde un jour, sans la partager (réponse authentifiée).
+TILE_CACHE_CONTROL = "private, max-age=86400"
+
+
+# Tuile d'une couche relayée (params.relayed, ADR-0046 du front) : le back la demande au service privé
+# avec sa clé d'API, que le navigateur ne voit jamais. Image du service, ou 404 hors couverture.
+@router.get("/layer-catalog/{code}/tiles/{z}/{x}/{y}")
+def layer_tile(code: str, z: int = Path(ge=0, le=MAX_ZOOM), x: int = Path(ge=0), y: int = Path(ge=0)) -> Response:
+    if x >= 2**z or y >= 2**z:
+        raise HTTPException(status_code=400, detail="Tuile hors de la grille")
+    try:
+        content, content_type = services.tile(code, z, x, y)
+    except services.UnknownTileLayer as error:
+        raise HTTPException(status_code=404, detail=f"Couche relayée {code} inconnue") from error
+    except TileNotFound as error:
+        raise HTTPException(status_code=404, detail="Tuile absente") from error
+    except FeatureServiceUnavailable as error:
+        raise HTTPException(status_code=502, detail=f"Service de la couche {code} injoignable") from error
+    return Response(content=content, media_type=content_type, headers={"Cache-Control": TILE_CACHE_CONTROL})

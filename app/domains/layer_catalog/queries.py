@@ -41,3 +41,18 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
         {"code": code},
     ).mappings().first()
     return None if row is None else dict(row)
+
+
+# Couche WMTS activée dont le back relaie les tuiles (params.relayed, migration 0010). None sinon.
+def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
+    row = connection.execute(
+        text(
+            """
+            SELECT code, url, params
+            FROM catalog_layers
+            WHERE code = :code AND enabled AND kind = 'wmts' AND (params ->> 'relayed')::boolean IS TRUE
+            """
+        ),
+        {"code": code},
+    ).mappings().first()
+    return None if row is None else dict(row)

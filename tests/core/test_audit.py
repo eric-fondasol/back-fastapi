@@ -86,7 +86,7 @@ def test_an_invalid_request_is_recorded(client, audit_entries):
     assert audit_entries[0]["status_code"] == 422
 
 
-@pytest.mark.parametrize("path", ["/api/health", "/docs", "/openapi.json"])
+@pytest.mark.parametrize("path", ["/api/health", "/docs", "/openapi.json", "/layer-catalog/fr-ign-scan25/tiles/12/2074/1409"])
 def test_technical_routes_are_not_recorded(client, audit_entries, path):
     client.get(path)
 

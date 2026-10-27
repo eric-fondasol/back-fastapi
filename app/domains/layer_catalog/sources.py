@@ -76,6 +76,42 @@ def wfs_features(url: str, params: dict[str, Any], bbox: Bbox) -> list[dict[str,
     return found
 
 
+class TileNotFound(Exception):
+    pass
+
+
+# Tuile WMTS (GetTile, KVP) d'un service privé, demandée avec la clé d'API. Une tuile hors de la zone
+# couverte ou du niveau de zoom servi (404 ou 400 du service) est TileNotFound ; un refus de la clé
+# (401, 403) ou une panne, FeatureServiceUnavailable.
+def wmts_tile(url: str, params: dict[str, Any], api_key: str, z: int, x: int, y: int) -> tuple[bytes, str]:
+    query = {
+        "SERVICE": "WMTS",
+        "REQUEST": "GetTile",
+        "VERSION": "1.0.0",
+        "LAYER": params["layer"],
+        "STYLE": params["style"],
+        "TILEMATRIXSET": params["tileMatrixSet"],
+        "FORMAT": params.get("format", "image/png"),
+        "TILEMATRIX": z,
+        "TILEROW": y,
+        "TILECOL": x,
+        "apikey": api_key,
+    }
+    try:
+        response = httpx.get(url, params=query, timeout=TIMEOUT_SECONDS, follow_redirects=True)
+    except httpx.HTTPError as error:
+        raise FeatureServiceUnavailable(type(error).__name__) from error
+    if response.status_code in (400, 404):
+        raise TileNotFound()
+    # Message sans l'URL : elle contient la clé, et l'erreur finit dans le journal.
+    if response.status_code != 200:
+        raise FeatureServiceUnavailable(f"Tuile refusée par le service ({response.status_code})")
+    content_type = response.headers.get("content-type", "")
+    if not content_type.startswith("image/"):
+        raise FeatureServiceUnavailable(f"Réponse qui n'est pas une image ({content_type or 'sans type'})")
+    return response.content, content_type
+
+
 # API GeoJSON : chaque paramètre est repris, « {bbox} » remplacé par « ouest,sud,est,nord », la taille
 # plafonnée par MAX_FEATURES.
 def geojson_features(url: str, params: dict[str, Any], bbox: Bbox) -> list[dict[str, Any]]:

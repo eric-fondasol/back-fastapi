@@ -4,6 +4,7 @@
 from decimal import Decimal
 from typing import Any
 
+from app.core.config import config
 from app.database.connection import refonte_transaction
 from app.domains.layer_catalog import queries, sources
 from app.domains.layer_catalog.geometry import Bbox, light_features
@@ -35,15 +36,44 @@ def _layer_json(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _relayed(row: dict[str, Any]) -> bool:
+    return (row["params"] or {}).get("relayed") is True
+
+
+def _private_api_key() -> str | None:
+    key = config.ign_private_api_key
+    return key.get_secret_value() if key is not None and key.get_secret_value() else None
+
+
+# Une couche relayée (tuiles demandées au back, qui ajoute la clé) n'est proposée que si la clé est
+# configurée : sans elle, ses tuiles seraient toutes en 404.
 def catalog() -> dict[str, Any]:
     with refonte_transaction() as connection:
         categories = queries.categories(connection)
         layers = queries.enabled_layers(connection)
 
+    has_key = _private_api_key() is not None
     return {
         "categories": [{"code": row["code"], "label": _localized(row["label_fr"], row["label_en"])} for row in categories],
-        "layers": [_layer_json(row) for row in layers],
+        "layers": [_layer_json(row) for row in layers if has_key or not _relayed(row)],
     }
+
+
+class UnknownTileLayer(Exception):
+    pass
+
+
+# Tuile d'une couche relayée, demandée au service privé avec la clé. UnknownTileLayer si le code ne
+# désigne pas une couche relayée activée, ou si la clé n'est pas configurée.
+def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:
+    api_key = _private_api_key()
+    if api_key is None:
+        raise UnknownTileLayer(code)
+    with refonte_transaction() as connection:
+        layer = queries.relayed_tile_layer(connection, code)
+    if layer is None:
+        raise UnknownTileLayer(code)
+    return sources.wmts_tile(layer["url"], layer["params"], api_key, z, x, y)
 
 
 class UnknownFeatureLayer(Exception):

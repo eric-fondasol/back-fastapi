@@ -2,6 +2,7 @@
 # dans la table audit_log de la base MySQL. Branché comme middleware dans main.py.
 
 import logging
+import re
 import time
 import uuid
 from datetime import datetime
@@ -18,6 +19,8 @@ from app.database.connection import execute_audit
 
 # Chemins non tracés : sonde, documentation et fichiers techniques du navigateur.
 IGNORED_PATHS = {"/", "/api/health", "/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json", "/favicon.ico"}
+# Tuiles de carte relayées : des dizaines à chaque déplacement de la carte, sans intérêt une à une.
+IGNORED_PATH_PATTERN = re.compile(r"^/layer-catalog/[^/]+/tiles/")
 # Au-delà de 10 Ko, le corps de la requête n'est pas recopié dans l'audit.
 MAX_BODY_SIZE = 10_000
 
@@ -35,7 +38,8 @@ INSERT = """
 # Middleware : enveloppe chaque requête. call_next exécute la suite (authentification, route).
 async def audit(request: Request, call_next) -> Response:
     # Pré-requêtes CORS du navigateur (OPTIONS) et chemins ignorés : on laisse passer sans tracer.
-    if request.method == "OPTIONS" or request.url.path in IGNORED_PATHS:
+    path = request.url.path
+    if request.method == "OPTIONS" or path in IGNORED_PATHS or IGNORED_PATH_PATTERN.match(path):
         return await call_next(request)
 
     # Identifiant unique de la requête : préfixe des lignes du journal et colonne request_id.
