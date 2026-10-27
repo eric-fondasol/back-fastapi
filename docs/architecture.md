@@ -338,7 +338,7 @@ Ces modèles deviendront utiles le jour où l'API écrira dans une base qui lui 
 | `app/domains/map/` | à la racine, pour garder le contrat actuel du front : `/searchSitesByArea`… |
 | `app/domains/france/natural_hazards/` | `/fr/natural-hazards/…` |
 | `app/domains/canada/contamination/` | `/ca/contamination/…` |
-| `app/domains/canada/land_registry/` | `/ca/land-registry/lots` (Cadastre allégé du Québec) |
+| `app/domains/canada/land_registry/` | `/ca/land-registry/lots` et `/ca/land-registry/lots/at` (Cadastre allégé du Québec) |
 | `app/domains/luxembourg/geology/` | `/lu/geology/…` |
 
 Conventions : code pays ISO (`fr`, `ca`, `lu`), noms en anglais, mots séparés par des
@@ -584,6 +584,8 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /searchSurveysByArea` | les sondages de l'emprise, positions seules |
 | `POST /searchSurveysByAreaDetails` | les sondages, avec `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` |
 | `POST /fr/land-registry/parcels` | une parcelle du cadastre français (GeoJSON), lue sur l'API Carto de l'IGN |
+| `POST /ca/land-registry/lots` | un lot du cadastre du Québec par son numéro (`{ "lot": "4019828" }`), GeoJSON avec `no_lot` et `area_m2` ; 404 introuvable, 502 service injoignable |
+| `POST /ca/land-registry/lots/at` | le lot qui contient un point cliqué (`{ "longitude", "latitude" }`, 422 hors du globe), pour la sélection de parcelles sur la carte : requête par point sur `Reference/Cadastre_allege/MapServer/0/query`, contour simplifié à 0,000005° ; `area_m2` calculée sur le contour (sphère de rayon WGS 84 ; 2 227,82 m² pour le lot 4 409 377, 2 227,95 au registre), le service ne publiant que `NO_LOT` ; 404 hors du cadastre rénové, 502 service injoignable |
 | `GET /me` | le profil de l'agent connecté (`id`, `email`, `displayName`), créé ou mis à jour |
 | `GET` · `PATCH /me/preferences` | langue, thème, territoire par défaut, style de carte, « Mes couches », `extra` |
 | `GET /me/favorites` | affaires, couches et adresses favorites |

@@ -108,7 +108,7 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **483 tests**, dans vingt-six
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **492 tests**, dans vingt-six
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |

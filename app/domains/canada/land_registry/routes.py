@@ -4,7 +4,8 @@
 from fastapi import APIRouter, HTTPException
 
 from app.domains.canada.land_registry import services
-from app.domains.canada.land_registry.schemas import LotCollection, LotFeature, LotProperties, LotSearch
+from app.domains.canada.land_registry.entities import Lot
+from app.domains.canada.land_registry.schemas import LotCollection, LotFeature, LotLocation, LotProperties, LotSearch
 from app.domains.canada.land_registry.sources import LandRegistryUnavailable
 
 router = APIRouter(prefix="/land-registry", tags=["Canada - Land registry"])
@@ -21,4 +22,20 @@ def find_lot(search: LotSearch) -> LotCollection:
         raise HTTPException(status_code=502, detail="Cadastre du Québec injoignable") from error
     if lot is None:
         raise HTTPException(status_code=404, detail=f"Lot {number} introuvable")
-    return LotCollection(features=[LotFeature(geometry=lot.geometry, properties=LotProperties(no_lot=lot.number))])
+    return _collection(lot)
+
+
+# Lot qui contient le point cliqué sur la carte, pour la sélection de parcelles. 404 hors du cadastre rénové.
+@router.post("/lots/at", response_model=LotCollection)
+def lot_at(location: LotLocation) -> LotCollection:
+    try:
+        lot = services.lot_at(location.longitude, location.latitude)
+    except LandRegistryUnavailable as error:
+        raise HTTPException(status_code=502, detail="Cadastre du Québec injoignable") from error
+    if lot is None:
+        raise HTTPException(status_code=404, detail="Aucun lot à cet endroit")
+    return _collection(lot)
+
+
+def _collection(lot: Lot) -> LotCollection:
+    return LotCollection(features=[LotFeature(geometry=lot.geometry, properties=LotProperties(no_lot=lot.number, area_m2=lot.area_m2()))])

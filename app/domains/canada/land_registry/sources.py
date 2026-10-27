@@ -17,16 +17,7 @@ class LandRegistryUnavailable(Exception):
 
 
 # Interroge le service et renvoie les lots trouvés, au format GeoJSON (liste de « features »).
-def lot_features(number: str) -> list[dict]:
-    params = {
-        # Le numéro ne contient que des chiffres et des espaces (schemas.py) : pas d'apostrophe à échapper.
-        "where": f"NO_LOT = '{number}'",
-        "outFields": "NO_LOT",
-        "returnGeometry": "true",
-        # Contour rendu en WGS 84, comme le cadastre France.
-        "outSR": "4326",
-        "f": "geojson",
-    }
+def _query(params: dict[str, str]) -> list[dict]:
     try:
         response = httpx.get(CADASTRE_ALLEGE_QUERY_URL, params=params, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
@@ -40,3 +31,30 @@ def lot_features(number: str) -> list[dict]:
         raise LandRegistryUnavailable(str(body)[:200])
 
     return body.get("features") or []
+
+
+# Champs et format communs : numéro de lot et contour, rendu en WGS 84 comme le cadastre France.
+ANSWER = {"outFields": "NO_LOT", "returnGeometry": "true", "outSR": "4326", "f": "geojson"}
+
+# Contour simplifié à 0,000005° près (environ 50 cm) : un grand lot rural pèse sinon jusqu'à 170 Ko.
+MAX_ALLOWABLE_OFFSET_DEGREES = "0.000005"
+
+
+# Lot portant ce numéro.
+def lot_features(number: str) -> list[dict]:
+    # Le numéro ne contient que des chiffres et des espaces (schemas.py) : pas d'apostrophe à échapper.
+    return _query({"where": f"NO_LOT = '{number}'", **ANSWER})
+
+
+# Lot qui contient ce point (clic sur la carte).
+def lot_features_at(longitude: float, latitude: float) -> list[dict]:
+    return _query(
+        {
+            "geometry": f"{longitude},{latitude}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "maxAllowableOffset": MAX_ALLOWABLE_OFFSET_DEGREES,
+            **ANSWER,
+        }
+    )
