@@ -37,13 +37,19 @@ def of_project(request: Request) -> list[dict[str, Any]]:
     ]
 
 
-# Sondages pressio et pénétro fiables à 1 000 m d'une position, et proposition qui en découle
+# Sondages fiables à 1 000 m d'une position, proposition qui en découle et fuseaux possibles
 # (US-INVESTIGATIONS-11 du front). Déclarée avant /investigations/{page_uuid}, qu'elle masquerait sinon.
 @router.get("/investigations/fuseau-offer")
 def fuseau_offer(request: Request, profile: Profile = Depends(current_profile)) -> dict[str, Any]:
     longitude, latitude = entities.position(request.query_params.get("longitude"), request.query_params.get("latitude"))
     offer = services.fuseau_offer(profile, longitude, latitude)
-    return {"surveys": offer.surveys, "offer": offer.offer, "answerRequired": offer.answer_required}
+    surveys = offer.surveys
+    return {
+        "surveys": {"pressiometric": surveys.pressiometric, "penetrometric": surveys.penetrometric, "total": surveys.total},
+        "offer": offer.offer,
+        "fuseauTypes": list(offer.fuseau_types),
+        "answerRequired": offer.answer_required,
+    }
 
 
 # La dernière version, avec son contenu (« data »).

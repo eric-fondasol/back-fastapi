@@ -611,7 +611,7 @@ La documentation interactive de toutes les routes est disponible sur
 | `GET /quotes/{numéro}` | devis lu dans Dynamics NAV (`FDS_API_Devis_RapportAutomatique`, OData V4, Basic Auth, `$filter=No eq '…'`, champs utiles seulement par `$select`) pour la recherche par n° de devis de la carte : `{ number, project_number, description, address, post_code, city, country_code, position }` ; `project_number` sans le préfixe « PR. » de NAV (Solscore enregistre `31GT.26.0134`, NAV `PR.31GT.26.0134`) ; `position` = GPS de l'adresse de livraison, `null` quand NAV donne 0, 0 ; numéro mis en majuscules, 422 s'il contient autre chose que lettres, chiffres, points et tirets (rien ne sort du filtre OData), 404 inconnu, 502 NAV injoignable, identifiants refusés ou variables `NAV_*` absentes |
 | `GET /case-detail/{identifiant GED}` · `GET /case-file/{numéro}?file=` | fiche GED d'une affaire ; un de ses fichiers, relayé en flux (502 si la GED est injoignable) |
 | `GET /investigations?projectRef=` | enquêtes d'une affaire, chacune avec ses versions (sans contenu), la plus récente en tête |
-| `GET /investigations/fuseau-offer?longitude=&latitude=` | sondages pressiométriques ou pénétrométriques fiables à 1 000 m dans l'entrepôt, et proposition qui en découle : `{ "surveys", "offer": "A00196" \| "A00195" \| null, "answerRequired" }` (25 et plus : A00196 ; 5 à 24 : A00195 ; `answerRequired` pour un agent GT et A00196) ; 400 position absente ou hors bornes (US-INVESTIGATIONS-11 du front) |
+| `GET /investigations/fuseau-offer?longitude=&latitude=` | sondages fiables à 1 000 m dans l'entrepôt, comptés par type d'essai, et proposition qui en découle : `{ "surveys": { "pressiometric", "penetrometric", "total" }, "offer": "A00196" \| "A00195" \| null, "fuseauTypes": ["pressiometric", "penetrometric"], "answerRequired" }`. A00196 dès 25 sondages d'un même type d'essai (`fuseauTypes` : les types qui les atteignent) ; sinon A00195 dès 5 sondages, tous types confondus ; `answerRequired` pour un agent GT et A00196 ; 400 position absente ou hors bornes (US-INVESTIGATIONS-11 du front) |
 | `GET /investigations/{uuid}` · `GET /investigations/{uuid}/versions/{n}` | dernière version ou version n, avec son contenu (`data`) |
 | `POST /investigations` · `POST /investigations/{uuid}/versions` | premier enregistrement (V1) ; nouvelle version (201). `fuseauAnalysis` (`sold_a00196`, `cannot_optimize`, `later`, `not_suitable` ou `null`) est rangé dans `saved_page_versions.fuseau_analysis` (migration `0012`) ; sans réponse, 422 quand la règle A00196 s'applique |
 | `PUT /investigations/{uuid}/versions/{n}` · `PATCH /investigations/{uuid}` | écrasement de la dernière version (409 sinon) ; renommage |
@@ -719,7 +719,8 @@ que la taille relayée reste juste.
 - un identifiant ou un numéro de version mal formé répond 404, comme une enquête inconnue.
 - règle A00196 (US-INVESTIGATIONS-11 du front) : un agent GT (métier de sa business unit,
   ADR-0047) ne peut enregistrer une version sans `fuseauAnalysis` quand 25 sondages fiables ou
-  plus entourent la position du contenu (`coordinates`). Le compte est refait par le back. Sans
+  plus d'un même type d'essai (pressiométrique ou pénétrométrique) entourent la position du contenu
+  (`coordinates`). Le compte est refait par le back. Sans
   position, ou si l'entrepôt ne répond pas (journalisé), l'enregistrement passe. La réponse est
   demandée à chaque version, écrasement compris. « Fiable » : `localisation_fiabilite = 1`,
   **hypothèse** à confirmer par le métier (`RELIABLE_SURVEY_LOCATION` de `queries.py`).

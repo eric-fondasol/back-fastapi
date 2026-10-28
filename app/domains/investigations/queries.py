@@ -10,8 +10,8 @@ from typing import Any
 from sqlalchemy import Connection, bindparam, text
 
 from app.core.errors import NotFound
-from app.database.connection import fetch_value
-from app.domains.investigations.entities import Author, Investigation, Summary, Version, has_coordinates
+from app.database.connection import fetch_rows
+from app.domains.investigations.entities import Author, Investigation, Summary, SurveyCounts, Version, has_coordinates
 
 PAGE_COLUMNS = "id, uuid, project_ref, project_ref_commentaire, data"
 VERSION_COLUMNS = "version.id, version.version, version.comment, version.user_id, version.author_name, version.created_at, version.updated_at"
@@ -22,14 +22,15 @@ RELIABLE_SURVEY_LOCATION = 1
 EARTH_RADIUS_M = 6371000
 METRES_PER_DEGREE = 111320
 
-# Sondages pressiométriques ou pénétrométriques fiables à moins de :radius mètres. Le rectangle
-# (index sur latitude, longitude) écarte d'abord l'essentiel, la distance de haversine tranche ensuite.
-RELIABLE_FUSEAU_SURVEYS_SQL = f"""
-    SELECT count(*)
+# Sondages fiables à moins de :radius mètres, comptés par type d'essai et tous types confondus. Le
+# rectangle (index sur latitude, longitude) écarte d'abord l'essentiel, la distance de haversine tranche ensuite.
+RELIABLE_SURVEYS_SQL = f"""
+    SELECT count(*) FILTER (WHERE has_mesure_pressiometrique IS TRUE) AS pressiometric,
+           count(*) FILTER (WHERE has_essai_penetro_dynamique IS TRUE) AS penetrometric,
+           count(*) AS total
     FROM public.sondage
     WHERE localisation_latitude_ywgs84 BETWEEN CAST(:minLat AS numeric) AND CAST(:maxLat AS numeric)
       AND localisation_longitude_xwgs84 BETWEEN CAST(:minLng AS numeric) AND CAST(:maxLng AS numeric)
-      AND (has_mesure_pressiometrique OR has_essai_penetro_dynamique)
       AND localisation_fiabilite = {RELIABLE_SURVEY_LOCATION}
       AND deleted IS NOT TRUE
       AND 2 * {EARTH_RADIUS_M} * asin(sqrt(
@@ -94,11 +95,11 @@ def latest_number(connection: Connection, page_id: int) -> int:
     ).scalar_one()
 
 
-def reliable_fuseau_surveys_around(longitude: float, latitude: float, radius_m: int) -> int:
+def reliable_surveys_around(longitude: float, latitude: float, radius_m: int) -> SurveyCounts:
     latitude_span = radius_m / METRES_PER_DEGREE
     longitude_span = latitude_span / max(math.cos(math.radians(latitude)), 0.01)
-    return fetch_value(
-        RELIABLE_FUSEAU_SURVEYS_SQL,
+    _, rows = fetch_rows(
+        RELIABLE_SURVEYS_SQL,
         minLat=latitude - latitude_span,
         maxLat=latitude + latitude_span,
         minLng=longitude - longitude_span,
@@ -107,6 +108,8 @@ def reliable_fuseau_surveys_around(longitude: float, latitude: float, radius_m: 
         latitude=latitude,
         radius=radius_m,
     )
+    pressiometric, penetrometric, total = rows[0]
+    return SurveyCounts(pressiometric, penetrometric, total)
 
 
 def append_version(

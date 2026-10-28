@@ -55,13 +55,13 @@ def read(page_uuid: str, number: int | None = None) -> tuple[Investigation, Vers
 
 # Sondages autour d'une position, proposition qui en découle, et réponse attendue de cet agent.
 def fuseau_offer(profile: Profile, longitude: float, latitude: float) -> FuseauOffer:
-    surveys = queries.reliable_fuseau_surveys_around(longitude, latitude, entities.FUSEAU_OFFER_RADIUS_M)
+    surveys = queries.reliable_surveys_around(longitude, latitude, entities.FUSEAU_OFFER_RADIUS_M)
     offer = entities.offer_for(surveys)
-    return FuseauOffer(surveys, offer, entities.fuseau_analysis_required(offer, profile.business_line))
+    return FuseauOffer(surveys, offer, entities.fuseau_types(surveys), entities.fuseau_analysis_required(offer, profile.business_line))
 
 
-# Refuse une version sans réponse quand la règle s'applique : agent GT, et 25 sondages ou plus autour
-# de la position enregistrée. Le compte est refait ici, sans se fier au front. Si l'entrepôt ne répond
+# Refuse une version sans réponse quand la règle s'applique : agent GT, et 25 sondages ou plus d'un même
+# type d'essai autour de la position enregistrée. Le compte est refait ici, sans se fier au front. Si l'entrepôt ne répond
 # pas, l'enregistrement passe : on ne bloque pas un agent sur une règle qu'on ne sait pas évaluer.
 def _check_fuseau_analysis(profile: Profile, data: str, answer: str | None) -> None:
     if answer is not None or profile.business_line != entities.FUSEAU_ANALYSIS_BUSINESS_LINE:

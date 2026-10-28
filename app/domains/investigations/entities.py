@@ -15,13 +15,16 @@ MAX_PROJECT_REF = 100
 MAX_COMMENT = 2000
 DEFAULT_SEARCH_LIMIT = 30
 
-# Proposition de fuseau ou de valorisation selon les sondages autour de l'enquête (US-INVESTIGATIONS-11
-# du front) : 25 sondages et plus → fuseau A00196, de 5 à 24 → valorisation A00195.
+# Proposition de fuseau ou de valorisation selon les sondages fiables autour de l'enquête
+# (US-INVESTIGATIONS-11 du front) : fuseau A00196 dès 25 sondages d'un même type d'essai, pressiométrique
+# ou pénétrométrique (un fuseau par type) ; sinon valorisation A00195 dès 5 sondages, tous types confondus.
 FUSEAU_OFFER_RADIUS_M = 1000
 FUSEAU_OFFER = "A00196"
 FUSEAU_OFFER_MIN_SURVEYS = 25
 VALORISATION_OFFER = "A00195"
 VALORISATION_OFFER_MIN_SURVEYS = 5
+PRESSIOMETRIC = "pressiometric"
+PENETROMETRIC = "penetrometric"
 
 # Seuls les agents de ce métier doivent répondre à « Avez-vous analysé votre fuseau ? » (ADR-0047).
 FUSEAU_ANALYSIS_BUSINESS_LINE = "GT"
@@ -60,11 +63,22 @@ class Version:
     data: str | None = None
 
 
-# Ce qu'on propose autour d'une position, et si l'agent devra répondre avant d'enregistrer.
+# Sondages fiables autour d'une position : avec un essai pressiométrique, avec un essai pénétrométrique
+# (un sondage peut avoir les deux), et tous types confondus.
+@dataclass(frozen=True)
+class SurveyCounts:
+    pressiometric: int
+    penetrometric: int
+    total: int
+
+
+# Ce qu'on propose autour d'une position, les fuseaux possibles, et si l'agent devra répondre avant
+# d'enregistrer.
 @dataclass(frozen=True)
 class FuseauOffer:
-    surveys: int
+    surveys: SurveyCounts
     offer: str | None
+    fuseau_types: tuple[str, ...]
     answer_required: bool
 
 
@@ -117,11 +131,16 @@ def position(longitude: str | None, latitude: str | None) -> tuple[float, float]
     return parsed
 
 
-def offer_for(surveys: int) -> str | None:
-    if surveys >= FUSEAU_OFFER_MIN_SURVEYS:
+def fuseau_types(surveys: SurveyCounts) -> tuple[str, ...]:
+    by_type = ((PRESSIOMETRIC, surveys.pressiometric), (PENETROMETRIC, surveys.penetrometric))
+    return tuple(fuseau_type for fuseau_type, count in by_type if count >= FUSEAU_OFFER_MIN_SURVEYS)
+
+
+def offer_for(surveys: SurveyCounts) -> str | None:
+    if fuseau_types(surveys):
         return FUSEAU_OFFER
 
-    if surveys >= VALORISATION_OFFER_MIN_SURVEYS:
+    if surveys.total >= VALORISATION_OFFER_MIN_SURVEYS:
         return VALORISATION_OFFER
 
     return None

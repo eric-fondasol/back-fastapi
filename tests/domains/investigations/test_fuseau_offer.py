@@ -3,21 +3,26 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from app.domains.investigations import queries
+from app.domains.investigations.entities import SurveyCounts
 from tests.domains.investigations.test_routes import SPIKE, client, create, scalar, send  # noqa: F401
 
 PARIS = {"lng": 2.3522, "lat": 48.8566}
 DATA_AT_PARIS = '{"coordinates":{"lng":2.3522,"lat":48.8566}}'
 
 
+def pressio(count):
+    return SurveyCounts(pressiometric=count, penetrometric=0, total=count)
+
+
 @pytest.fixture
 def surveys(monkeypatch):
-    found = {"count": 0, "calls": []}
+    found = {"counts": pressio(0), "calls": []}
 
     def around(longitude, latitude, radius_m):
         found["calls"].append((longitude, latitude, radius_m))
-        return found["count"]
+        return found["counts"]
 
-    monkeypatch.setattr(queries, "reliable_fuseau_surveys_around", around)
+    monkeypatch.setattr(queries, "reliable_surveys_around", around)
     return found
 
 
@@ -36,15 +41,26 @@ def offer(client, longitude=2.3522, latitude=48.8566):
 
 
 @pytest.mark.parametrize(
-    ("count", "expected"),
-    [(40, "A00196"), (25, "A00196"), (24, "A00195"), (5, "A00195"), (4, None), (0, None)],
+    ("counts", "expected", "fuseau_types"),
+    [
+        (SurveyCounts(40, 0, 40), "A00196", ["pressiometric"]),
+        (SurveyCounts(25, 0, 25), "A00196", ["pressiometric"]),
+        (SurveyCounts(0, 25, 30), "A00196", ["penetrometric"]),
+        (SurveyCounts(30, 26, 45), "A00196", ["pressiometric", "penetrometric"]),
+        (SurveyCounts(20, 10, 30), "A00195", []),
+        (SurveyCounts(24, 24, 40), "A00195", []),
+        (SurveyCounts(0, 0, 5), "A00195", []),
+        (SurveyCounts(0, 0, 4), None, []),
+        (SurveyCounts(0, 0, 0), None, []),
+    ],
 )
-def test_the_offer_depends_on_the_reliable_surveys_within_1000_m(client, surveys, count, expected):
-    surveys["count"] = count
+def test_a_fuseau_needs_25_surveys_of_one_test_type_and_a_valorisation_5_surveys_of_any_type(client, surveys, counts, expected, fuseau_types):
+    surveys["counts"] = counts
 
     answer = offer(client)
 
-    assert (answer["surveys"], answer["offer"]) == (count, expected)
+    assert (answer["offer"], answer["fuseauTypes"]) == (expected, fuseau_types)
+    assert answer["surveys"] == {"pressiometric": counts.pressiometric, "penetrometric": counts.penetrometric, "total": counts.total}
     assert surveys["calls"] == [(2.3522, 48.8566, 1000)]
 
 
@@ -54,7 +70,7 @@ def test_the_offer_depends_on_the_reliable_surveys_within_1000_m(client, surveys
 )
 def test_only_a_gt_agent_must_answer_when_a_fuseau_is_possible(client, refonte_database, surveys, department, count, required):
     as_agent_of(client, refonte_database, department)
-    surveys["count"] = count
+    surveys["counts"] = pressio(count)
 
     assert offer(client)["answerRequired"] is required
 
@@ -68,7 +84,7 @@ def test_refuses_a_missing_or_invalid_position(client, surveys, query):
 
 def test_a_gt_agent_cannot_save_without_answer_when_a_fuseau_is_possible(client, refonte_database, surveys):
     as_agent_of(client, refonte_database, "31GT")
-    surveys["count"] = 25
+    surveys["counts"] = pressio(25)
 
     refused = send(client, "POST", "/investigations", {"projectRef": "31GT.26.0134", "data": DATA_AT_PARIS}, expected=422)
 
@@ -79,7 +95,7 @@ def test_a_gt_agent_cannot_save_without_answer_when_a_fuseau_is_possible(client,
 
 def test_the_answer_is_kept_with_each_version_and_asked_again_for_the_next(client, refonte_database, surveys):
     as_agent_of(client, refonte_database, "31GT")
-    surveys["count"] = 30
+    surveys["counts"] = pressio(30)
 
     created = create(client, {"projectRef": "31GT.26.0134", "data": DATA_AT_PARIS, "fuseauAnalysis": "later"})
     path = f"/investigations/{created['uuid']}"
@@ -104,7 +120,7 @@ def test_the_answer_is_kept_with_each_version_and_asked_again_for_the_next(clien
 )
 def test_saves_without_answer_when_the_rule_does_not_apply(client, refonte_database, surveys, department, count, data):
     as_agent_of(client, refonte_database, department)
-    surveys["count"] = count
+    surveys["counts"] = pressio(count)
 
     created = create(client, {"projectRef": "31GT.26.0134", "data": data})
 
@@ -118,7 +134,7 @@ def test_saves_without_answer_when_the_warehouse_cannot_count(client, refonte_da
     def unreachable(*_):
         raise OperationalError("SELECT", {}, Exception("entrepot injoignable"))
 
-    monkeypatch.setattr(queries, "reliable_fuseau_surveys_around", unreachable)
+    monkeypatch.setattr(queries, "reliable_surveys_around", unreachable)
 
     create(client, {"projectRef": "31GT.26.0134", "data": DATA_AT_PARIS})
 
