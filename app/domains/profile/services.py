@@ -236,8 +236,9 @@ def _is_uuid(value: str) -> bool:
     return True
 
 
-# Remplace le service enregistré par celui qu'Azure AD donne aujourd'hui (null l'efface).
-# Sans « department » (Graph n'a pas répondu au front), le service connu est gardé.
+# Remplace le département enregistré par celui qu'Azure AD donne aujourd'hui (null l'efface),
+# et la business unit qui en découle.
+# Sans « department » (Graph n'a pas répondu au front), le département connu est gardé.
 def record_department(user_id: str, raw: dict[str, Any]) -> None:
     if "department" not in raw:
         return

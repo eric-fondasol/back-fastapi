@@ -587,13 +587,13 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /fr/land-registry/parcels` | une parcelle du cadastre français (GeoJSON), lue sur l'API Carto de l'IGN |
 | `POST /ca/land-registry/lots` | un lot du cadastre du Québec par son numéro (`{ "lot": "4019828" }`), GeoJSON avec `no_lot` et `area_m2` ; 404 introuvable, 502 service injoignable |
 | `POST /ca/land-registry/lots/at` | le lot qui contient un point cliqué (`{ "longitude", "latitude" }`, 422 hors du globe), pour la sélection de parcelles sur la carte : requête par point sur `Reference/Cadastre_allege/MapServer/0/query`, contour simplifié à 0,000005° ; `area_m2` calculée sur le contour (sphère de rayon WGS 84 ; 2 227,82 m² pour le lot 4 409 377, 2 227,95 au registre), le service ne publiant que `NO_LOT` ; 404 hors du cadastre rénové, 502 service injoignable |
-| `GET /me` | le profil de l'agent connecté (`id`, `email`, `displayName`), créé ou mis à jour |
+| `GET /me` | le profil de l'agent connecté (`id`, `email`, `displayName`, `department` : département Azure brut, `businessUnitCode` : business unit si le département en est une, `businessLine` : son métier), créé ou mis à jour |
 | `GET` · `PATCH /me/preferences` | langue, thème, territoire par défaut, style de carte, « Mes couches », `extra` |
 | `GET /me/favorites` | affaires, couches et adresses favorites |
 | `PUT` · `DELETE /me/favorites/projects/{numéro}`, `/me/favorites/layers/{id}` | ajout et retrait d'un favori (204) |
 | `POST /me/favorites/addresses` · `DELETE /me/favorites/addresses/{id}` | adresse favorite : 201 créée, 200 déjà présente, 422 au-delà de 20 |
 | `POST /me/favorites/import` | reprise unique des favoris du navigateur ; renvoie favoris et préférences |
-| `PUT /me/sign-in` | appelée par le serveur du front à chaque connexion : crée le profil ou met à jour adresse, nom et `last_login_at`, puis range le service Azure de l'agent (`{ "department": "44EN" }`, `department` de Graph) brut dans `users.service_id` (`null` l'efface) ; 204 |
+| `PUT /me/sign-in` | appelée par le serveur du front à chaque connexion : crée le profil ou met à jour adresse, nom et `last_login_at`, puis range le service Azure de l'agent (`{ "department": "44EN" }`, `department` de Graph) brut dans `users.department` (`null` l'efface), et dans `users.business_unit_code` s'il existe dans `business_units` (migration `0011`, ADR-0047 du front) ; 204 |
 | `GET /me/layers` · `POST /me/layers` | couches ajoutées par l'agent (flux WMS, WMTS, XYZ, ou fichier envoyé en GeoJSON WGS 84, 5 Mo et 50 000 objets au plus, rangé en jsonb ; la liste ne donne que l'emprise d'un fichier ; 201 ; 422 au-delà de 50) |
 | `GET /me/layers/{id}/geojson` | GeoJSON d'une couche fichier (404 pour un flux ou la couche d'un autre) |
 | `PATCH` · `DELETE /me/layers/{id}` | renomme et/ou change le style (`style` : `color`, `lineWidth`, `pointRadius`, `labelField`) ; supprime, et retire la couche des favoris et de « Mes couches » (404 pour la couche d'un autre) |
@@ -611,8 +611,9 @@ La documentation interactive de toutes les routes est disponible sur
 | `GET /quotes/{numéro}` | devis lu dans Dynamics NAV (`FDS_API_Devis_RapportAutomatique`, OData V4, Basic Auth, `$filter=No eq '…'`, champs utiles seulement par `$select`) pour la recherche par n° de devis de la carte : `{ number, project_number, description, address, post_code, city, country_code, position }` ; `project_number` sans le préfixe « PR. » de NAV (Solscore enregistre `31GT.26.0134`, NAV `PR.31GT.26.0134`) ; `position` = GPS de l'adresse de livraison, `null` quand NAV donne 0, 0 ; numéro mis en majuscules, 422 s'il contient autre chose que lettres, chiffres, points et tirets (rien ne sort du filtre OData), 404 inconnu, 502 NAV injoignable, identifiants refusés ou variables `NAV_*` absentes |
 | `GET /case-detail/{identifiant GED}` · `GET /case-file/{numéro}?file=` | fiche GED d'une affaire ; un de ses fichiers, relayé en flux (502 si la GED est injoignable) |
 | `GET /investigations?projectRef=` | enquêtes d'une affaire, chacune avec ses versions (sans contenu), la plus récente en tête |
+| `GET /investigations/fuseau-offer?longitude=&latitude=` | sondages pressiométriques ou pénétrométriques fiables à 1 000 m dans l'entrepôt, et proposition qui en découle : `{ "surveys", "offer": "A00196" \| "A00195" \| null, "answerRequired" }` (25 et plus : A00196 ; 5 à 24 : A00195 ; `answerRequired` pour un agent GT et A00196) ; 400 position absente ou hors bornes (US-INVESTIGATIONS-11 du front) |
 | `GET /investigations/{uuid}` · `GET /investigations/{uuid}/versions/{n}` | dernière version ou version n, avec son contenu (`data`) |
-| `POST /investigations` · `POST /investigations/{uuid}/versions` | premier enregistrement (V1) ; nouvelle version (201) |
+| `POST /investigations` · `POST /investigations/{uuid}/versions` | premier enregistrement (V1) ; nouvelle version (201). `fuseauAnalysis` (`sold_a00196`, `cannot_optimize`, `later`, `not_suitable` ou `null`) est rangé dans `saved_page_versions.fuseau_analysis` (migration `0012`) ; sans réponse, 422 quand la règle A00196 s'applique |
 | `PUT /investigations/{uuid}/versions/{n}` · `PATCH /investigations/{uuid}` | écrasement de la dernière version (409 sinon) ; renommage |
 | `GET /saved-page/search?q=&limit=` | recherche d'enquêtes par n° d'affaire ou nom (30 par défaut ; 404 sans résultat) |
 | `GET /parametrage` | message d'accueil, adresse de contact et lien du manuel (dernière version) |
@@ -716,6 +717,12 @@ que la taille relayée reste juste.
   parallèle) ;
 - `data` est un texte ; envoyé en objet ou en liste JSON, il est enregistré en texte JSON ;
 - un identifiant ou un numéro de version mal formé répond 404, comme une enquête inconnue.
+- règle A00196 (US-INVESTIGATIONS-11 du front) : un agent GT (métier de sa business unit,
+  ADR-0047) ne peut enregistrer une version sans `fuseauAnalysis` quand 25 sondages fiables ou
+  plus entourent la position du contenu (`coordinates`). Le compte est refait par le back. Sans
+  position, ou si l'entrepôt ne répond pas (journalisé), l'enregistrement passe. La réponse est
+  demandée à chaque version, écrasement compris. « Fiable » : `localisation_fiabilite = 1`,
+  **hypothèse** à confirmer par le métier (`RELIABLE_SURVEY_LOCATION` de `queries.py`).
 
 Les routes `/saved-page/create`, `/saved-page/update/…`, `/saved-page/{uuid}` et
 `/saved-page/user/…` de l'ancien front ne sont pas reprises (ADR-0034) ; seule la recherche

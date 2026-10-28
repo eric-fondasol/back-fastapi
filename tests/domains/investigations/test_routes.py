@@ -186,7 +186,7 @@ def test_simultaneous_saves_never_share_a_version_number(client, refonte_databas
     profile = current_profile(SPIKE)
 
     with ThreadPoolExecutor(max_workers=6) as pool:
-        saved = list(pool.map(lambda index: services.add_version(profile, page_uuid, f"v{index}", None)[1].number, range(12)))
+        saved = list(pool.map(lambda index: services.add_version(profile, page_uuid, f"v{index}", None, None)[1].number, range(12)))
 
     assert sorted(saved) == list(range(2, 14))
     assert scalar(refonte_database, "SELECT max(version) FROM saved_page_versions") == 13

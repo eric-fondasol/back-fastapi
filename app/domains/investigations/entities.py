@@ -15,6 +15,18 @@ MAX_PROJECT_REF = 100
 MAX_COMMENT = 2000
 DEFAULT_SEARCH_LIMIT = 30
 
+# Proposition de fuseau ou de valorisation selon les sondages autour de l'enquête (US-INVESTIGATIONS-11
+# du front) : 25 sondages et plus → fuseau A00196, de 5 à 24 → valorisation A00195.
+FUSEAU_OFFER_RADIUS_M = 1000
+FUSEAU_OFFER = "A00196"
+FUSEAU_OFFER_MIN_SURVEYS = 25
+VALORISATION_OFFER = "A00195"
+VALORISATION_OFFER_MIN_SURVEYS = 5
+
+# Seuls les agents de ce métier doivent répondre à « Avez-vous analysé votre fuseau ? » (ADR-0047).
+FUSEAU_ANALYSIS_BUSINESS_LINE = "GT"
+FUSEAU_ANALYSIS_ANSWERS = ("sold_a00196", "cannot_optimize", "later", "not_suitable")
+
 
 @dataclass(frozen=True)
 class Investigation:
@@ -48,6 +60,14 @@ class Version:
     data: str | None = None
 
 
+# Ce qu'on propose autour d'une position, et si l'agent devra répondre avant d'enregistrer.
+@dataclass(frozen=True)
+class FuseauOffer:
+    surveys: int
+    offer: str | None
+    answer_required: bool
+
+
 # Résultat de la recherche par numéro d'affaire ou par nom.
 @dataclass(frozen=True)
 class Summary:
@@ -64,6 +84,58 @@ def has_coordinates(data: str | None) -> bool:
         return False
 
     return isinstance(decoded, dict) and decoded.get("coordinates") is not None
+
+
+# Position enregistrée dans le contenu (« coordinates »: {"lng", "lat"}), ou None si absente ou illisible.
+def coordinates(data: str) -> tuple[float, float] | None:
+    try:
+        decoded = json.loads(data)
+    except ValueError:
+        return None
+
+    point = decoded.get("coordinates") if isinstance(decoded, dict) else None
+    longitude, latitude = (point.get("lng"), point.get("lat")) if isinstance(point, dict) else (None, None)
+
+    if not all(isinstance(value, int | float) and not isinstance(value, bool) for value in (longitude, latitude)):
+        return None
+
+    if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
+        return None
+
+    return float(longitude), float(latitude)
+
+
+def position(longitude: str | None, latitude: str | None) -> tuple[float, float]:
+    try:
+        parsed = float(longitude or ""), float(latitude or "")
+    except ValueError:
+        raise InvalidRequest("Les parametres longitude et latitude sont requis.") from None
+
+    if not (-180 <= parsed[0] <= 180 and -90 <= parsed[1] <= 90):
+        raise InvalidRequest("Position hors bornes.")
+
+    return parsed
+
+
+def offer_for(surveys: int) -> str | None:
+    if surveys >= FUSEAU_OFFER_MIN_SURVEYS:
+        return FUSEAU_OFFER
+
+    if surveys >= VALORISATION_OFFER_MIN_SURVEYS:
+        return VALORISATION_OFFER
+
+    return None
+
+
+def fuseau_analysis_required(offer: str | None, business_line: str | None) -> bool:
+    return offer == FUSEAU_OFFER and business_line == FUSEAU_ANALYSIS_BUSINESS_LINE
+
+
+def fuseau_analysis(value: Any) -> str | None:
+    if value is None or value in FUSEAU_ANALYSIS_ANSWERS:
+        return value
+
+    raise InvalidRequest(f"fuseauAnalysis doit valoir {', '.join(FUSEAU_ANALYSIS_ANSWERS)}, ou null.")
 
 
 def content(data: str) -> str:

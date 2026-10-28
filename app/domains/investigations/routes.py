@@ -14,6 +14,7 @@ from app.core.body import json_object
 from app.core.errors import InvalidRequest, NotFound
 from app.core.profile import Profile, current_profile
 from app.domains.investigations import services
+from app.domains.investigations import entities
 from app.domains.investigations.entities import DEFAULT_SEARCH_LIMIT, Investigation, Version, text_field
 
 router = APIRouter(tags=["Investigations"])
@@ -36,6 +37,15 @@ def of_project(request: Request) -> list[dict[str, Any]]:
     ]
 
 
+# Sondages pressio et pénétro fiables à 1 000 m d'une position, et proposition qui en découle
+# (US-INVESTIGATIONS-11 du front). Déclarée avant /investigations/{page_uuid}, qu'elle masquerait sinon.
+@router.get("/investigations/fuseau-offer")
+def fuseau_offer(request: Request, profile: Profile = Depends(current_profile)) -> dict[str, Any]:
+    longitude, latitude = entities.position(request.query_params.get("longitude"), request.query_params.get("latitude"))
+    offer = services.fuseau_offer(profile, longitude, latitude)
+    return {"surveys": offer.surveys, "offer": offer.offer, "answerRequired": offer.answer_required}
+
+
 # La dernière version, avec son contenu (« data »).
 @router.get("/investigations/{page_uuid}")
 def latest(page_uuid: str) -> dict[str, Any]:
@@ -56,13 +66,20 @@ def create(payload: dict[str, Any] = Depends(json_object), profile: Profile = De
         text_field(payload, "name"),
         text_field(payload, "data") or "",
         text_field(payload, "comment"),
+        entities.fuseau_analysis(payload.get("fuseauAnalysis")),
     )
     return JSONResponse(_saved(*saved), status_code=201)
 
 
 @router.post("/investigations/{page_uuid}/versions")
 def add_version(page_uuid: str, payload: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)) -> JSONResponse:
-    saved = services.add_version(profile, _uuid(page_uuid), text_field(payload, "data") or "", text_field(payload, "comment"))
+    saved = services.add_version(
+        profile,
+        _uuid(page_uuid),
+        text_field(payload, "data") or "",
+        text_field(payload, "comment"),
+        entities.fuseau_analysis(payload.get("fuseauAnalysis")),
+    )
     return JSONResponse(_saved(*saved), status_code=201)
 
 
@@ -72,7 +89,12 @@ def revise_version(
     page_uuid: str, number: str, payload: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)
 ) -> dict[str, Any]:
     saved = services.revise_version(
-        profile, _uuid(page_uuid), _number(number), text_field(payload, "data") or "", text_field(payload, "comment")
+        profile,
+        _uuid(page_uuid),
+        _number(number),
+        text_field(payload, "data") or "",
+        text_field(payload, "comment"),
+        entities.fuseau_analysis(payload.get("fuseauAnalysis")),
     )
     return _saved(*saved)
 

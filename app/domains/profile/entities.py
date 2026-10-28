@@ -496,7 +496,7 @@ def layer_style(value: Any) -> dict[str, Any]:
 
 
 # Service de l'agent dans Azure AD (attribut « department » de Microsoft Graph, ex. « 44EN », « GFDT »),
-# lu par le front à chaque connexion et gardé tel quel dans users.service_id. Vide = inconnu.
+# lu par le front à chaque connexion et gardé tel quel dans users.department. Vide = inconnu.
 MAX_DEPARTMENT_LENGTH = 100
 
 

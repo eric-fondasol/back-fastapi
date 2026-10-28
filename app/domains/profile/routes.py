@@ -22,7 +22,14 @@ NO_CONTENT = 204
 @router.get("")
 def me(identity: Identity = Depends(current_identity)) -> dict[str, Any]:
     profile = provision(identity)
-    return {"id": profile.id, "email": profile.email, "displayName": profile.display_name, "serviceId": profile.service_id}
+    return {
+        "id": profile.id,
+        "email": profile.email,
+        "displayName": profile.display_name,
+        "department": profile.department,
+        "businessUnitCode": profile.business_unit_code,
+        "businessLine": profile.business_line,
+    }
 
 
 # Appelée par le serveur du front à chaque connexion : crée le profil ou met à jour son adresse, son nom

@@ -298,5 +298,16 @@ def _user_layer(row: Any) -> UserLayer:
     )
 
 
-def set_department(connection: Connection, user_id: str, service_id: str | None) -> None:
-    connection.execute(text("UPDATE users SET service_id = :service_id WHERE id = :user_id"), {"service_id": service_id, "user_id": user_id})
+# La business unit n'est retenue que si le département Azure est un code connu de business_units.
+def set_department(connection: Connection, user_id: str, department: str | None) -> None:
+    connection.execute(
+        text(
+            """
+            UPDATE users
+            SET department = :department,
+                business_unit_code = (SELECT code FROM business_units WHERE code = :department)
+            WHERE id = :user_id
+            """
+        ),
+        {"department": department, "user_id": user_id},
+    )

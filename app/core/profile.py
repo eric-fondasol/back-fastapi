@@ -15,19 +15,29 @@ from app.core.errors import Forbidden
 from app.database.connection import refonte_row, refonte_transaction
 
 
+# Le métier de l'agent vient de sa business unit (31GT → GT) ; vide hors agence ou code inconnu.
+PROFILE_SELECT = """
+    SELECT users.id, users.azure_oid, users.email, users.display_name, users.department,
+           users.business_unit_code, business_units.business_line
+    FROM users LEFT JOIN business_units ON business_units.code = users.business_unit_code
+"""
+
+
 @dataclass(frozen=True)
 class Profile:
     id: str
     azure_oid: str
     email: str
     display_name: str | None
-    service_id: str | None = None
+    department: str | None = None
+    business_unit_code: str | None = None
+    business_line: str | None = None
 
 
 # Dépendance FastAPI : le profil de l'appelant, créé s'il n'existe pas encore.
 def current_profile(identity: Identity = Depends(current_identity)) -> Profile:
     azure_oid = _azure_oid(identity)
-    row = refonte_row("SELECT id, azure_oid, email, display_name, service_id FROM users WHERE azure_oid = :oid", oid=azure_oid)
+    row = refonte_row(f"{PROFILE_SELECT} WHERE users.azure_oid = :oid", oid=azure_oid)
     return _profile(row) if row else provision(identity)
 
 
@@ -51,7 +61,7 @@ def provision(identity: Identity) -> Profile:
                     SET email = EXCLUDED.email,
                         display_name = COALESCE(EXCLUDED.display_name, users.display_name),
                         last_login_at = EXCLUDED.last_login_at
-                RETURNING id, azure_oid, email, display_name, service_id
+                RETURNING id
                 """
             ),
             {
@@ -62,8 +72,9 @@ def provision(identity: Identity) -> Profile:
                 "at": datetime.now(UTC),
             },
         ).mappings().one()
+        profile = connection.execute(text(f"{PROFILE_SELECT} WHERE users.id = :id"), {"id": row["id"]}).mappings().one()
 
-    return _profile(dict(row))
+    return _profile(dict(profile))
 
 
 # L'oid est la clé du profil : sans oid valide, impossible de savoir à quel profil écrire.
@@ -75,4 +86,12 @@ def _azure_oid(identity: Identity) -> str:
 
 
 def _profile(row: dict) -> Profile:
-    return Profile(str(row["id"]), str(row["azure_oid"]), row["email"], row["display_name"], row["service_id"])
+    return Profile(
+        str(row["id"]),
+        str(row["azure_oid"]),
+        row["email"],
+        row["display_name"],
+        row["department"],
+        row["business_unit_code"],
+        row["business_line"],
+    )

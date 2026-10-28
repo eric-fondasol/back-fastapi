@@ -108,7 +108,7 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **510 tests**, dans vingt-sept
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **539 tests**, dans vingt-neuf
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
@@ -123,9 +123,11 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/domains/map/test_routes.py` | 17 | la base d'apisolscore |
 | `tests/domains/profile/test_entities.py` | 24 | rien |
 | `tests/domains/profile/test_routes.py` | 22 | la base métier de test |
+| `tests/domains/profile/test_sign_in.py` | 10 | la base métier de test (département Azure, business unit et métier) |
 | `tests/domains/projects/test_entities.py` | 50 | rien |
 | `tests/domains/projects/test_routes.py` | 74 | la base métier de test |
 | `tests/domains/investigations/test_routes.py` | 30 | la base métier de test |
+| `tests/domains/investigations/test_fuseau_offer.py` | 24 | la base métier de test (comptage de l'entrepôt simulé) |
 | `tests/domains/projects/test_ged.py` | 14 | la base métier de test (GED simulée) |
 | `tests/domains/quotes/test_routes.py` | 18 | rien (Navision simulé) |
 | `tests/domains/layer_catalog/test_routes.py` | 12 | base de test (migrations `0007` et `0008` rejouées par leur fonction `seed`) |
@@ -137,6 +139,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/domains/socle/test_routes.py` | 28 | la base métier de test (images dans un dossier temporaire) |
 | `tests/domains/reports/test_reports.py` | 13 | rien (dépôt FTP simulé) |
 | `tests/domains/desk_study/test_desk_study.py` | 26 | rien (sources simulées) |
+| `tests/migrations/test_0011_business_lines_units_roles.py` | 3 | la base métier de test (redescend à `0010`, remplit `services` et `users`, remonte) |
 
 Les tests qui écrivent n'utilisent jamais la base métier de `DB_REFONTE_NAME`. Ils passent
 par `DB_REFONTE_TEST_NAME` (`fondasol_fastapi_test` par défaut), sur le même serveur. Cette
