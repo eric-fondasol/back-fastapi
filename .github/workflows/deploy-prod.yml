@@ -1,0 +1,32 @@
+# A placer dans le depot back-fastapi : .github/workflows/deploy-prod.yml
+name: Deploiement production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Redeployer meme si la version est deja en place"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-prod-back
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, windows, solscore-prod]
+    timeout-minutes: 30
+    steps:
+      - name: Deployer sur le serveur de production
+        shell: powershell
+        run: |
+          if ('${{ inputs.force }}' -eq 'true') {
+            & C:\apps\solscore\deploy-back.ps1 -Force
+          } else {
+            & C:\apps\solscore\deploy-back.ps1
+          }
+          exit $LASTEXITCODE
