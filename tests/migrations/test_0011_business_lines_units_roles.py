@@ -7,10 +7,8 @@ ALEMBIC = AlembicConfig("alembic.ini")
 
 
 @pytest.fixture
-def before_0011(refonte_database):
-    command.downgrade(ALEMBIC, "0010")
-    yield refonte_database
-    command.upgrade(ALEMBIC, "head")
+def before_0011(schema_at):
+    return schema_at("0010")
 
 
 def rows(database, query):
