@@ -140,7 +140,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/domains/reports/test_reports.py` | 13 | rien (dépôt FTP simulé) |
 | `tests/domains/desk_study/test_desk_study.py` | 26 | rien (sources simulées) |
 | `tests/migrations/test_0011_business_lines_units_roles.py` | 3 | la base métier de test (reconstruite jusqu'à `0010`, remplit `services` et `users`, remonte) |
-| `tests/migrations/test_v3_cutover.py` | 5 | la base métier de test (reconstruite jusqu'à `0014`, ancien schéma rempli, tables d'attente de l'entrepôt simulées, puis `head`) |
+| `tests/migrations/test_v3_cutover.py` | 6 | la base métier de test (reconstruite jusqu'à `0014`, ancien schéma rempli, tables d'attente de l'entrepôt simulées, puis `head`) |
 
 Les tests qui écrivent n'utilisent jamais la base métier de `DB_REFONTE_NAME`. Ils passent
 par `DB_REFONTE_TEST_NAME` (`fondasol_fastapi_test` par défaut), sur le même serveur. Cette

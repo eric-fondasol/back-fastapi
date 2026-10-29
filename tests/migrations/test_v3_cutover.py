@@ -170,3 +170,18 @@ def test_former_tables_go_and_the_new_ones_are_created(former_schema):
     } <= tables
     assert rows(former_schema, "SELECT id, business_unit_codes FROM departments") == [("77", "77GT")]
     assert rows(former_schema, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'user_layers' AND column_name = 'west'") == [(0,)]
+
+
+def test_projects_get_the_soilcloud_flag_off_and_no_origin(former_schema):
+    stage_warehouse(former_schema)
+
+    command.upgrade(ALEMBIC, "head")
+
+    assert rows(former_schema, "SELECT project_number, is_active_soilcloud, origin FROM projects ORDER BY project_number") == [
+        ("77GT.19.0220", False, None),
+        ("ZZ.99.0001", False, None),
+    ]
+    assert rows(
+        former_schema,
+        "SELECT data_type, character_maximum_length FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'origin'",
+    ) == [("character varying", 255)]
