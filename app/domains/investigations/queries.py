@@ -11,7 +11,7 @@ from sqlalchemy import Connection, bindparam, text
 
 from app.core.errors import NotFound
 from app.database.connection import fetch_rows
-from app.domains.investigations.entities import Author, Investigation, Summary, SurveyCounts, Version, has_coordinates
+from app.domains.investigations.entities import Author, Investigation, Nearby, Summary, SurveyCounts, Version, has_coordinates
 
 PAGE_COLUMNS = "id, uuid, project_ref, project_ref_commentaire, data"
 VERSION_COLUMNS = "version.id, version.version, version.comment, version.user_id, version.author_name, version.created_at, version.updated_at"
@@ -229,6 +229,53 @@ def search(connection: Connection, query: str | None, limit: int) -> list[Summar
         parameters,
     ).mappings()
     return [Summary(str(row["uuid"]), row["project_ref"], row["project_ref_commentaire"], has_coordinates(row["data"])) for row in rows]
+
+
+# Enquêtes avec un n° d'affaire dont la position enregistrée (« coordinates » du contenu, texte JSON)
+# est à moins de :radius mètres. Le contenu est relu à chaque appel, en json (plus rapide à lire que
+# jsonb pour une seule clé) : environ 0,5 s pour 2 000 enquêtes, tant que saved_pages.data reste du
+# texte (jsonb prévu par le schéma v3). Sans contrôle préalable du JSON, qui doublait la durée : un
+# contenu illisible fait échouer la requête (aucun le 29/10/2026 ; le front n'affiche alors aucune suggestion).
+NEARBY_SQL = f"""
+    WITH positioned AS (
+        SELECT uuid, project_ref, project_ref_commentaire,
+               (point ->> 'lng')::float8 AS longitude,
+               (point ->> 'lat')::float8 AS latitude
+        FROM saved_pages
+        CROSS JOIN LATERAL (SELECT data::json -> 'coordinates' AS point) parsed
+        WHERE trim(coalesce(project_ref, '')) <> ''
+          AND json_typeof(point -> 'lng') = 'number'
+          AND json_typeof(point -> 'lat') = 'number'
+    ), measured AS (
+        SELECT *, 2 * {EARTH_RADIUS_M} * asin(sqrt(
+                   power(sin(radians(latitude - :latitude) / 2), 2)
+                   + cos(radians(:latitude)) * cos(radians(latitude)) * power(sin(radians(longitude - :longitude) / 2), 2)
+               )) AS distance
+        FROM positioned
+        WHERE latitude BETWEEN :minLat AND :maxLat AND longitude BETWEEN :minLng AND :maxLng
+    )
+    SELECT uuid, project_ref, project_ref_commentaire, distance FROM measured
+    WHERE distance <= :radius ORDER BY distance, project_ref LIMIT :limit
+"""
+
+
+def nearby(connection: Connection, longitude: float, latitude: float, radius_m: int, limit: int) -> list[Nearby]:
+    latitude_span = radius_m / METRES_PER_DEGREE
+    longitude_span = latitude_span / max(math.cos(math.radians(latitude)), 0.01)
+    rows = connection.execute(
+        text(NEARBY_SQL),
+        {
+            "longitude": longitude,
+            "latitude": latitude,
+            "minLat": latitude - latitude_span,
+            "maxLat": latitude + latitude_span,
+            "minLng": longitude - longitude_span,
+            "maxLng": longitude + longitude_span,
+            "radius": radius_m,
+            "limit": limit,
+        },
+    ).mappings()
+    return [Nearby(str(row["uuid"]), row["project_ref"], row["project_ref_commentaire"], round(row["distance"])) for row in rows]
 
 
 def _escape_like(value: str) -> str:

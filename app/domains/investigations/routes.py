@@ -37,6 +37,17 @@ def of_project(request: Request) -> list[dict[str, Any]]:
     ]
 
 
+# Enquêtes enregistrées à moins de 200 m d'une position, la plus proche en tête : proposées à la
+# reprise après une recherche d'adresse. Déclarée avant /investigations/{page_uuid}.
+@router.get("/investigations/nearby")
+def nearby(request: Request) -> list[dict[str, Any]]:
+    longitude, latitude = entities.position(request.query_params.get("longitude"), request.query_params.get("latitude"))
+    return [
+        {"uuid": found.uuid, "projectRef": found.project_ref, "name": found.name, "distance": found.distance_m}
+        for found in services.nearby(longitude, latitude)
+    ]
+
+
 # Sondages fiables à 1 000 m d'une position, proposition qui en découle et fuseaux possibles
 # (US-INVESTIGATIONS-11 du front). Déclarée avant /investigations/{page_uuid}, qu'elle masquerait sinon.
 @router.get("/investigations/fuseau-offer")
