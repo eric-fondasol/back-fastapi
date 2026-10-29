@@ -546,6 +546,19 @@ docker compose exec api alembic upgrade head   # appliquer les révisions suivan
 docker compose exec api alembic current        # révision de la base
 ```
 
+**Basculement sur le schéma v3** (ADR-0048 du front, révisions `0014` à `0020`, sans retour
+arrière : on restaure le dump) : les données venues de l'entrepôt passent par des tables d'attente,
+remplies entre deux étapes ; ancien front et back Symfony arrêtés avant.
+
+```bash
+docker compose exec api alembic upgrade 0014
+docker compose exec api python -m app.database.v3_staging   # entrepôt → v3_warehouse_* (19 s le 29/10/2026)
+docker compose exec api alembic upgrade head
+```
+
+Les tests des migrations reconstruisent la base de test jusqu'à une révision (fixture `schema_at`
+de `tests/migrations/conftest.py`) plutôt que de redescendre depuis `head`.
+
 Ajouter une révision : `docker compose exec api alembic revision -m "titre court"`, puis
 écrire `upgrade()` à la main avec `op.execute(...)` (pas d'autogénération : il n'y a pas de
 modèle SQLAlchemy).
