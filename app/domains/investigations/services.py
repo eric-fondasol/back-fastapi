@@ -12,7 +12,7 @@ from app.core.logger import logger
 from app.core.profile import Profile
 from app.database.connection import refonte_transaction
 from app.domains.investigations import entities, queries
-from app.domains.investigations.entities import Author, FuseauOffer, Investigation, Summary, Version
+from app.domains.investigations.entities import Author, FuseauOffer, Investigation, Nearby, Summary, Version
 
 
 # Les versions sont datées à la seconde (timestamp(0)) : on tronque avant, pour renvoyer ce qui est stocké.
@@ -51,6 +51,11 @@ def read(page_uuid: str, number: int | None = None) -> tuple[Investigation, Vers
             raise NotFound(f"Version d'enquete introuvable : {page_uuid} V{number}")
 
         return investigation, found, latest.number if latest else found.number
+
+
+def nearby(longitude: float, latitude: float) -> list[Nearby]:
+    with refonte_transaction() as connection:
+        return queries.nearby(connection, longitude, latitude, entities.NEARBY_RADIUS_M, entities.NEARBY_LIMIT)
 
 
 # Sondages autour d'une position, proposition qui en découle, et réponse attendue de cet agent.

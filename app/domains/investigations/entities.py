@@ -26,6 +26,11 @@ VALORISATION_OFFER_MIN_SURVEYS = 5
 PRESSIOMETRIC = "pressiometric"
 PENETROMETRIC = "penetrometric"
 
+# Enquêtes enregistrées proposées à la reprise autour d'une adresse recherchée, de la plus proche à la
+# plus lointaine (module Enquête du front).
+NEARBY_RADIUS_M = 200
+NEARBY_LIMIT = 10
+
 # Seuls les agents de ce métier doivent répondre à « Avez-vous analysé votre fuseau ? » (ADR-0047).
 FUSEAU_ANALYSIS_BUSINESS_LINE = "GT"
 FUSEAU_ANALYSIS_ANSWERS = ("sold_a00196", "cannot_optimize", "later", "not_suitable")
@@ -80,6 +85,15 @@ class FuseauOffer:
     offer: str | None
     fuseau_types: tuple[str, ...]
     answer_required: bool
+
+
+# Enquête enregistrée près d'une position, à `distance_m` mètres.
+@dataclass(frozen=True)
+class Nearby:
+    uuid: str
+    project_ref: str
+    name: str | None
+    distance_m: int
 
 
 # Résultat de la recherche par numéro d'affaire ou par nom.
