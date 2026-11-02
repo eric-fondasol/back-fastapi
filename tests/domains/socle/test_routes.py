@@ -52,33 +52,25 @@ def test_a_missing_setting_gives_an_empty_structure(client):
     assert client.get("/parametrage").json() == {"Email": "", "Message": "", "Horodatage": None, "UrlManuelUtilisateur": ""}
 
 
-def test_access_limited_zones_keep_the_legacy_case_and_may_be_empty(client, refonte_database):
+def test_access_limited_zones_are_retired_and_answer_an_empty_list(client):
     assert client.get("/access-limited-zones").json() == []
-
-    execute(refonte_database, "INSERT INTO access_limited_zones (id, description, latitude, longitude, zone_km) VALUES ('Z1', 'Base aérienne', 43.6, 1.4, 2.5)")
-
-    assert client.get("/access-limited-zones").json() == [
-        {"ID": "Z1", "Description": "Base aérienne", "Latitude": 43.6, "Longitude": 1.4, "ZoneKm": 2.5}
-    ]
 
 
 def test_about_returns_the_caller_identity(client):
     assert client.get("/about").json() == AGENT
 
 
-def test_a_visit_is_attached_to_the_agent_service(client, refonte_database):
-    execute(refonte_database, f"INSERT INTO email_services (id, service_code) VALUES ('{AGENT.upper()}', '69GT')")
+def test_a_visit_is_attached_to_the_agent_service_without_being_stored(client, refonte_database):
+    attach(refonte_database, "69GT")
 
     visit = client.put("/ajout-statistique-visite", json={"Libelle": "openMap"}).json()
 
     assert (visit["Libelle"], visit["ServiceCode"], visit["UserEmail"]) == ("openMap", "69GT", AGENT)
     assert visit["Horodatage"].endswith("+00:00")
-    assert scalar(refonte_database, "SELECT service_code FROM statistique_visites") == "69GT"
 
 
-def test_a_visit_without_known_service_is_still_recorded(client, refonte_database):
+def test_a_visit_without_known_service_answers_an_empty_code(client):
     assert client.put("/ajout-statistique-visite", json={"Libelle": "openMap"}).json()["ServiceCode"] == ""
-    assert scalar(refonte_database, "SELECT count(*) FROM statistique_visites") == 1
 
 
 def test_a_visit_without_label_is_refused(client):
@@ -91,17 +83,18 @@ def test_a_visit_without_label_is_refused(client):
 def agencies(refonte_database):
     execute(
         refonte_database,
-        "INSERT INTO services (id, libelle, full_access, tab) VALUES "
-        "('69GT', 'Agence de Lyon', false, 1), ('31GT', 'Agence de Toulouse', false, 2), "
-        "('00GT', 'Direction technique', true, 3), ('34GT', 'Agence de Montpellier', false, 4)",
+        "INSERT INTO business_units (code, libelle, full_access) VALUES "
+        "('69GT', 'Agence de Lyon', false), ('31GT', 'Agence de Toulouse', false), "
+        "('00GT', 'Direction technique', true), ('34GT', 'Agence de Montpellier', false)",
     )
-    execute(refonte_database, "INSERT INTO departments (id, libelle, code_service) VALUES ('69', 'Rhone', '69GT|31GT')")
-    execute(refonte_database, "INSERT INTO service_departments (service, department) VALUES ('69GT', '69'), ('31GT', '69')")
+    execute(refonte_database, "INSERT INTO departments (id, libelle, business_unit_codes) VALUES ('69', 'Rhone', '69GT|31GT')")
     return refonte_database
 
 
+# L'agence d'un agent est sa business unit, écrite dans users à la connexion.
 def attach(engine, code):
-    execute(engine, f"INSERT INTO email_services (id, service_code) VALUES ('{AGENT}', '{code}')")
+    execute(engine, f"INSERT INTO business_units (code, libelle) VALUES ('{code}', '{code}') ON CONFLICT DO NOTHING")
+    execute(engine, f"INSERT INTO users (id, email, business_unit_code, created_at) VALUES (gen_random_uuid(), '{AGENT.upper()}', '{code}', now())")
 
 
 def search(client, department="69", label="searchAddress"):
@@ -131,16 +124,6 @@ def test_the_covering_agencies_are_returned_aligned(client, agencies):
         "Agence de Lyon", "69GT|31GT", "Agence de Lyon|Agence de Toulouse",
     )
     assert (tracing["Longitude"], tracing["Latitude"]) == (4.83, 45.76)
-
-
-def test_the_visit_points_to_the_address_search(client, agencies):
-    attach(agencies, "69GT")
-
-    tracing = search(client, label="searchAddress")
-
-    with agencies.connect() as connection:
-        visit = connection.execute(text("SELECT * FROM statistique_visites")).mappings().one()
-    assert (visit["libelle"], visit["address_search_tracing_id"], visit["service_code"]) == ("searchAddress", tracing["ID"], "69GT")
 
 
 def test_a_missing_department_is_refused(client):

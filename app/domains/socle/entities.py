@@ -33,7 +33,7 @@ class AccessLimitedZone:
     radius_kilometers: float
 
 
-# Une agence (table services) : « full_access » l'autorise sur tout le territoire.
+# Une agence (business unit) : « full_access » l'autorise sur tout le territoire.
 @dataclass(frozen=True)
 class Agency:
     code: str

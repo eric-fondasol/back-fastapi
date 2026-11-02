@@ -120,7 +120,7 @@ def test_an_unconfigured_ged_is_unavailable(monkeypatch):
 @pytest.fixture
 def client(refonte_database):
     with refonte_database.begin() as connection:
-        connection.execute(text("INSERT INTO projects (id, externe_id, is_doc_ged) VALUES ('EMA.04.0140', '39c6f5b1-c15b', true)"))
+        connection.execute(text("INSERT INTO projects (id, project_number, is_doc_ged) VALUES ('39c6f5b1-c15b', 'EMA.04.0140', true)"))
 
     app.dependency_overrides[current_user] = lambda: "test@fondasol.fr"
 

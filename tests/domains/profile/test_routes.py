@@ -15,7 +15,7 @@ EMPTY_FAVORITES = {"projects": [], "layers": [], "addresses": []}
 @pytest.fixture
 def client(refonte_database):
     with refonte_database.begin() as connection:
-        connection.execute(text("INSERT INTO projects (id, is_doc_ged) VALUES ('IP.02.0222', false)"))
+        connection.execute(text("INSERT INTO projects (id, project_number, is_doc_ged) VALUES (gen_random_uuid()::text, 'IP.02.0222', false)"))
 
     caller = {"identity": SPIKE}
     app.dependency_overrides[current_identity] = lambda: caller["identity"]
@@ -124,7 +124,7 @@ def test_a_project_and_a_layer_are_added_to_and_removed_from_favorites(client):
 
 def test_a_project_number_with_a_slash_can_be_a_favorite(client, refonte_database):
     with refonte_database.begin() as connection:
-        connection.execute(text("INSERT INTO projects (id, is_doc_ged) VALUES ('PR.GT01.25.0082 / DE-16511', false)"))
+        connection.execute(text("INSERT INTO projects (id, project_number, is_doc_ged) VALUES (gen_random_uuid()::text, 'PR.GT01.25.0082 / DE-16511', false)"))
 
     assert call(client, "PUT", "/me/favorites/projects/PR.GT01.25.0082%20%2F%20DE-16511").status_code == 204
     assert call(client, "GET", "/me/favorites").json()["projects"] == ["PR.GT01.25.0082 / DE-16511"]

@@ -98,7 +98,9 @@ def create(
     page_uuid, now = str(uuid.uuid4()), _now()
 
     with refonte_transaction() as connection:
-        queries.create(connection, page_uuid, data, profile.email, profile.display_name, project_ref, name, now)
+        queries.create(
+            connection, page_uuid, profile.id, profile.email, profile.display_name, project_ref, entities.reference_type(project_ref), name, now
+        )
         page_id = queries.lock(connection, page_uuid)
         version = queries.append_version(connection, page_id, data, comment, _author(profile), now, fuseau_analysis)
         return _existing(connection, page_uuid), version
@@ -111,7 +113,7 @@ def add_version(profile: Profile, page_uuid: str, data: str, comment: str | None
     with refonte_transaction() as connection:
         page_id = queries.lock(connection, page_uuid)
         version = queries.append_version(connection, page_id, data, comment, _author(profile), now, fuseau_analysis)
-        queries.replace_content(connection, page_id, data, now)
+        queries.touch(connection, page_id, now)
         return _existing(connection, page_uuid), version
 
 
@@ -131,7 +133,7 @@ def revise_version(
 
         entities.assert_revisable(number, latest)
         version = queries.revise_version(connection, page_id, number, data, comment, _author(profile), now, fuseau_analysis)
-        queries.replace_content(connection, page_id, data, now)
+        queries.touch(connection, page_id, now)
         return _existing(connection, page_uuid), version
 
 

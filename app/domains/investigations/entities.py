@@ -1,6 +1,6 @@
 # Objets métier des enquêtes enregistrées et de leurs versions (ADR-0032 du front).
 # Une enquête (table saved_pages) a des versions numérotées 1, 2, 3… (saved_page_versions) ; seule
-# la dernière peut être écrasée. saved_pages.data reprend toujours le contenu de la dernière version.
+# la dernière peut être écrasée. Le contenu n'est que dans les versions (jsonb, schéma v3).
 # Règles et messages repris du back Symfony (InvestigationContent, SavedPage, InvestigationVersion).
 
 import json
@@ -173,11 +173,29 @@ def fuseau_analysis(value: Any) -> str | None:
     raise InvalidRequest(f"fuseauAnalysis doit valoir {', '.join(FUSEAU_ANALYSIS_ANSWERS)}, ou null.")
 
 
+# Le contenu est stocké en jsonb : il doit être un objet JSON.
 def content(data: str) -> str:
     if not data.strip():
         raise InvalidRequest("Le contenu de l'enquete (data) est requis.")
 
+    try:
+        decoded = json.loads(data)
+    except ValueError:
+        decoded = None
+
+    if not isinstance(decoded, dict):
+        raise InvalidRequest("Le contenu de l'enquete (data) doit etre un objet JSON.")
+
     return data
+
+
+# Type de la référence d'une enquête (saved_pages.type_reference, migration 0018) : 0 devis (« SQ. »),
+# 1 affaire. 2 (coordonnées seules, sans référence) ne se crée pas : le n° est requis.
+QUOTE_REFERENCE_PREFIX = "SQ."
+
+
+def reference_type(project_ref: str) -> int:
+    return 0 if project_ref.startswith(QUOTE_REFERENCE_PREFIX) else 1
 
 
 def project_ref(value: str) -> str:

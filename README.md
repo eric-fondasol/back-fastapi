@@ -20,7 +20,7 @@ Modèle d'API pour structurer apisolscore. Elle fournit au front Solscore :
 
 Toutes les routes métier exigent le jeton SSO (Azure AD) de l'utilisateur connecté.
 Chaque requête est tracée (qui, quoi, comment, quand) dans un fichier texte par jour
-(`logs/AAAA-MM-JJ.txt`) et dans la table `audit_log` d'une base MySQL.
+(`logs/AAAA-MM-JJ.txt`) et dans la table `usage_logs` de la base métier.
 
 L'architecture, le parcours d'une requête et la façon d'ajouter une route, un thème ou
 un pays sont détaillés dans [docs/architecture.md](docs/architecture.md).
@@ -46,9 +46,8 @@ sont décrites dans `docs/architecture.md`, section 6.
 
 - `http://localhost:8082/` redirige vers la documentation interactive `/docs`.
 - L'API n'écoute que sur la machine (`127.0.0.1:8082`).
-- phpMyAdmin, pour consulter la base d'audit : `http://localhost:8083` (identifiants
-  `DB_AUDIT_USER` / `DB_AUDIT_PASSWORD` du `.env`). MySQL est aussi joignable sur
-  `127.0.0.1:3307`.
+- Le journal d'usage se consulte dans la table `usage_logs` de la base métier (pgAdmin du
+  back Symfony, `http://localhost:5050`).
 - Le code de `app/` et le `.env` sont montés dans le conteneur : l'API redémarre toute
   seule à chaque modification, y compris du `.env`. Rien à reconstruire.
 - Seules une modification du `Dockerfile` ou des dépendances (`requirements.txt`)
@@ -108,13 +107,13 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **545 tests**, dans trente
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **569 tests**, dans 35
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
 |---|---|---|
 | `tests/core/test_auth.py` | 21 | rien |
-| `tests/core/test_audit.py` | 10 | la base d'apisolscore et la base d'audit |
+| `tests/core/test_audit.py` | 11 | la base d'apisolscore et la base métier de test (`usage_logs`) |
 | `tests/core/test_errors.py` | 6 | rien |
 | `tests/core/test_profile.py` | 7 | la base métier de test |
 | `tests/core/test_warmup.py` | 2 | la base d'apisolscore et la base métier |
@@ -125,24 +124,27 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/domains/profile/test_routes.py` | 22 | la base métier de test |
 | `tests/domains/profile/test_sign_in.py` | 10 | la base métier de test (département Azure, business unit et métier) |
 | `tests/domains/projects/test_entities.py` | 50 | rien |
-| `tests/domains/projects/test_routes.py` | 74 | la base métier de test |
-| `tests/domains/investigations/test_routes.py` | 30 | la base métier de test |
+| `tests/domains/projects/test_routes.py` | 75 | la base métier de test |
+| `tests/domains/investigations/test_routes.py` | 34 | la base métier de test |
 | `tests/domains/investigations/test_fuseau_offer.py` | 27 | la base métier de test (comptage de l'entrepôt simulé) |
 | `tests/domains/investigations/test_nearby.py` | 3 | la base métier de test |
-| `tests/domains/projects/test_ged.py` | 14 | la base métier de test (GED simulée) |
+| `tests/domains/projects/test_ged.py` | 15 | la base métier de test (GED simulée) |
 | `tests/domains/quotes/test_routes.py` | 18 | rien (Navision simulé) |
 | `tests/domains/layer_catalog/test_routes.py` | 12 | base de test (migrations `0007` et `0008` rejouées par leur fonction `seed`) |
 | `tests/domains/layer_catalog/test_features.py` | 16 | base de test (migrations `0007` à `0009` rejouées ; services WFS et Hub'Eau simulés) |
 | `tests/domains/layer_catalog/test_tiles.py` | 15 | base de test (migrations `0007` à `0010` rejouées ; Géoplateforme simulée, clé de test) |
-| `tests/domains/layer_catalog/test_geometry.py` | 8 | rien |
+| `tests/domains/layer_catalog/test_geometry.py` | 9 | rien |
 | `tests/domains/layer_catalog/test_gml.py` | 5 | rien |
 | `tests/domains/survey_imports/test_routes.py` | 13 | rien (classeurs .xlsx créés par le test ; .xls dans `fixtures/`, généré par `make_sondages_xls.py`) |
-| `tests/domains/socle/test_routes.py` | 28 | la base métier de test (images dans un dossier temporaire) |
+| `tests/domains/socle/test_routes.py` | 27 | la base métier de test (images dans un dossier temporaire) |
 | `tests/domains/reports/test_reports.py` | 13 | rien (dépôt FTP simulé) |
 | `tests/domains/desk_study/test_desk_study.py` | 26 | rien (sources simulées) |
 | `tests/migrations/test_0011_business_lines_units_roles.py` | 3 | la base métier de test (reconstruite jusqu'à `0010`, remplit `services` et `users`, remonte) |
-| `tests/migrations/test_v3_cutover.py` | 6 | la base métier de test (reconstruite jusqu'à `0014`, ancien schéma rempli, tables d'attente de l'entrepôt simulées, puis `head`) |
+| `tests/migrations/test_v3_cutover.py` | 7 | la base métier de test (reconstruite jusqu'à `0014`, ancien schéma rempli, tables d'attente de l'entrepôt simulées, puis `head`) |
 | `tests/migrations/test_0022_v4_reference_levels.py` | 5 | la base métier de test (reconstruite jusqu'à `0021`, une affaire, un site et un sondage, puis `0022` et retour à `0021`) |
+| `tests/migrations/test_0013_remove_ign_cadastre.py` | 3 | la base métier de test (reconstruite jusqu'à `0012`, catalogue, préférences et enquête remplis, puis la reprise de `0013`) |
+| `tests/migrations/test_0023_business_units_full_access.py` | 1 | la base métier de test (reconstruite jusqu'à `0022`, deux business units, puis `0023`) |
+| `tests/migrations/test_0024_usage_logs.py` | 3 | la base métier de test (reconstruite jusqu'à `0023`, puis `0024` : une requête journalisée, statut négatif refusé, index) |
 
 Les tests qui écrivent n'utilisent jamais la base métier de `DB_REFONTE_NAME`. Ils passent
 par `DB_REFONTE_TEST_NAME` (`fondasol_fastapi_test` par défaut), sur le même serveur. Cette
@@ -201,7 +203,8 @@ Portage des tests du back Symfony (`GeolocationClassifierTest`, `ProjectSearchCr
 ### `tests/domains/investigations/test_routes.py` — les enquêtes et leurs versions (30 tests)
 
 Portage des tests du back Symfony (`InvestigationTest`, recherche de `SavedPageTest`), plus :
-contenu envoyé en objet, `saved_pages.data` qui suit la dernière version, et 12
+contenu envoyé en objet, contenu lu dans la dernière version (schéma v3), type de référence et auteur
+de l'enquête, et 12
 enregistrements simultanés qui prennent chacun un numéro différent (sans le verrou
 `FOR UPDATE`, ce test échoue sur la contrainte d'unicité).
 
@@ -237,11 +240,11 @@ budget global sont abandonnées.
 | `test_a_domain_error_becomes_its_http_status_with_the_symfony_body` (×5) | chaque erreur donne son code (400, 403, 404, 409, 422) et `{ "errors": message }` |
 | `test_the_api_converts_domain_errors` | le gestionnaire est branché sur l'API |
 
-### `tests/core/test_audit.py` — le journal et l'audit (10 tests)
+### `tests/core/test_audit.py` — le journal et l'audit (11 tests)
 
-Pendant les tests, l'écriture en base d'audit est remplacée par une liste en mémoire
+Pendant les tests, l'écriture dans `usage_logs` est remplacée par une liste en mémoire
 (`tests/conftest.py`) et le journal va dans un dossier temporaire : les tests ne
-polluent ni `audit_log` ni `logs/`.
+polluent ni `usage_logs` ni `logs/`. Les deux tests d'écriture réelle visent la base métier de test.
 
 | Test | Ce qu'il vérifie |
 |---|---|
@@ -249,8 +252,9 @@ polluent ni `audit_log` ni `logs/`.
 | `test_a_rejected_request_is_recorded_as_anonymous` | une requête sans jeton est tracée (401, sans utilisateur) |
 | `test_an_invalid_request_is_recorded` | une requête invalide est tracée (422, avec l'utilisateur) |
 | `test_technical_routes_are_not_recorded` (×3) | `/api/health`, `/docs` et `/openapi.json` ne sont pas tracés |
-| `test_an_unavailable_audit_database_does_not_break_the_request` | si la base d'audit est en panne, la requête répond quand même 200 |
-| `test_an_entry_is_saved_in_the_audit_database` | une entrée est réellement insérée dans `audit_log`, relue, puis supprimée |
+| `test_an_unavailable_audit_database_does_not_break_the_request` | si l'écriture dans `usage_logs` échoue, la requête répond quand même 200 |
+| `test_an_entry_is_saved_in_usage_logs` | une entrée est réellement insérée dans `usage_logs` et relue colonne par colonne (`request_id` en uuid, `details` en jsonb, date à la milliseconde) |
+| `test_an_entry_without_details_is_saved_with_an_empty_details` | une entrée sans utilisateur, sans action et sans détails est insérée avec ces colonnes vides |
 | `test_the_log_file_is_named_after_the_day_of_the_event` | le journal change de fichier quand le jour change |
 
 ### `tests/core/test_warmup.py` — le préchauffage au démarrage (2 tests)

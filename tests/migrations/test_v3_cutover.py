@@ -130,6 +130,28 @@ def test_sites_carry_the_position_and_surveys_the_warehouse_data(former_schema):
     assert rows(former_schema, "SELECT em, pf, pl, p0 FROM pressures") == [(12.5, 0.8, 1.4, 0.1)]
 
 
+# 8 372 affaires de la base locale avaient une position sans site le 02/11/2026 : leur position passe dans
+# un site créé sous leur n°, sans quoi le retrait de projects.geometry la perdrait.
+def test_a_positioned_project_without_site_gets_one_under_its_number(former_schema):
+    run(
+        former_schema,
+        """
+        INSERT INTO projects (id, name, is_doc_ged, altitude, geometry) VALUES
+            ('31GT.20.0001', 'Sans site', false, 145.2, ST_SetSRID(ST_MakePoint(1.44, 43.6), 4326)),
+            ('31GT.20.0002', 'Sans site ni position', false, NULL, NULL)
+        """,
+    )
+    stage_warehouse(former_schema)
+
+    command.upgrade(ALEMBIC, "head")
+
+    assert rows(
+        former_schema,
+        "SELECT s.id, s.longitude, s.latitude, s.altitude, ST_X(s.geometry) FROM sites s "
+        "JOIN projects p ON p.id = s.project_id WHERE p.project_number LIKE '31GT.20.%'",
+    ) == [("31GT.20.0001", 1.44, 43.6, 145.2, 1.44)]
+
+
 def test_investigations_keep_their_content_in_versions_and_get_their_reference_type_and_author(former_schema):
     stage_warehouse(former_schema)
 

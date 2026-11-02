@@ -1,7 +1,7 @@
 # Connexions aux bases de données, partagées par tous les domaines :
 # - apisolscore (PostgreSQL), lue en lecture seule pour les sites et sondages ;
 # - refonte (PostgreSQL), la base métier : affaires, profils, enquêtes, en lecture et écriture ;
-# - audit (MySQL), où core/audit.py écrit la table audit_log.
+# core/audit.py écrit la table usage_logs de la base métier (migration 0024).
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -49,26 +49,6 @@ def refonte_url(database: str | None = None) -> URL:
 
 refonte_engine = create_engine(refonte_url(), pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=1800)
 
-audit_engine = create_engine(
-    URL.create(
-        "mysql+pymysql",
-        username=config.db_audit_user,
-        password=config.db_audit_password.get_secret_value(),
-        host=config.db_audit_host,
-        port=config.db_audit_port,
-        database=config.db_audit_name,
-        # utf8mb4 : stocke tous les caractères Unicode (accents, emojis éventuels dans les requêtes).
-        query={"charset": "utf8mb4"},
-    ),
-    pool_size=5,
-    max_overflow=5,
-    pool_pre_ping=True,
-    pool_recycle=1800,
-    # Abandonne au bout de 5 s si la base d'audit ne répond pas, pour ne pas accumuler les attentes.
-    connect_args={"connect_timeout": 5},
-)
-
-
 # Exécute une requête et renvoie une seule valeur (première colonne de la première ligne).
 def fetch_value(sql: str, **parameters: Any) -> Any:
     # timed("db") : la durée apparaît dans details.timings_ms.db de l'audit.
@@ -104,8 +84,9 @@ def refonte_row(sql: str, **parameters: Any) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
-# Écrit dans la base d'audit. begin() ouvre une transaction validée (commit) à la sortie du bloc,
-# ou annulée en cas d'erreur.
-def execute_audit(sql: str, **parameters: Any) -> None:
-    with audit_engine.begin() as connection:
+# Écrit une ligne de usage_logs dans la base métier. begin() ouvre une transaction validée (commit) à
+# la sortie du bloc, ou annulée en cas d'erreur. Sans timed() : l'écriture a lieu après la réponse,
+# sa durée n'a pas sa place dans les durées de la requête.
+def execute_usage_log(sql: str, **parameters: Any) -> None:
+    with refonte_engine.begin() as connection:
         connection.execute(text(sql), parameters)

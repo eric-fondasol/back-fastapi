@@ -55,24 +55,22 @@ def project(project_id: str) -> Project:
 def project_with_site_count(project_id: str) -> tuple[Project, int]:
     with refonte_transaction() as connection:
         found = _existing_project(connection, project_id)
-        return found, len(queries.project_sites(connection, project_id))
+        return found, len(queries.project_sites(connection, found.key))
 
 
 def project_surveys(project_id: str) -> list[Survey]:
     with refonte_transaction() as connection:
-        _existing_project(connection, project_id)
-        return queries.project_surveys(connection, project_id, PROJECT_SURVEYS_LIMIT)
+        found = _existing_project(connection, project_id)
+        return queries.project_surveys(connection, found.key, PROJECT_SURVEYS_LIMIT)
 
 
 # Une position remet à zéro le motif de non-géolocalisation et déplace tous les chantiers de
-# l'affaire ; sans position, un motif marque l'affaire non géolocalisable.
+# l'affaire ; sans position, un motif marque l'affaire non géolocalisable. Position et altitude sont
+# celles des chantiers (schéma v3).
 def relocate_project(project_id: str, change: PositionChange) -> Project:
     with refonte_transaction() as connection:
         relocated = _relocated(_existing_project(connection, project_id), change)
-
-        if change.coordinates is not None:
-            queries.relocate_project_sites(connection, project_id, change.coordinates)
-
+        queries.relocate_project_sites(connection, relocated, change.coordinates, change.altitude)
         queries.update_project(connection, relocated)
         return relocated
 
@@ -92,18 +90,17 @@ def relocate_survey(survey_id: str, change: PositionChange) -> Survey:
 # Présence de documents GED déclarée par un utilisateur : écrase la valeur du script de la GED.
 def set_ged_presence(project_id: str, present: bool, username: str) -> Project:
     with refonte_transaction() as connection:
-        changed = replace(
-            _existing_project(connection, project_id), is_doc_ged=present, is_doc_ged_updated_by=username, is_doc_ged_updated_at=_now()
-        )
-        queries.update_ged_presence(connection, changed)
+        found = _existing_project(connection, project_id)
+        changed = replace(found, is_doc_ged=present, is_doc_ged_updated_by=username, is_doc_ged_updated_at=_now())
+        queries.update_ged_presence(connection, changed, found.is_doc_ged)
         return changed
 
 
 # Le sondage rejoint le chantier de l'affaire le plus proche, sous l'identifiant « <affaire>_<nom> ».
 def add_survey(project_id: str, addition: SurveyAddition) -> Survey:
     with refonte_transaction() as connection:
-        _existing_project(connection, project_id)
-        site = nearest_site(queries.project_sites(connection, project_id), addition.coordinates)
+        found = _existing_project(connection, project_id)
+        site = nearest_site(queries.project_sites(connection, found.key), addition.coordinates)
 
         if site is None:
             raise Unprocessable(f"L'affaire {project_id} n'a pas de chantier.")
@@ -113,16 +110,16 @@ def add_survey(project_id: str, addition: SurveyAddition) -> Survey:
         if queries.find_survey(connection, survey_id) is not None:
             raise Conflict(f"Le sondage {survey_id} existe déjà.")
 
-        survey = Survey(survey_id, site.id, addition.coordinates, altitude=addition.altitude, updated_at=_now())
+        survey = Survey(survey_id, site.id, addition.coordinates, name=addition.name, altitude=addition.altitude, updated_at=_now())
         queries.insert_survey(connection, survey)
         return survey
 
 
-# Fiche GED d'une affaire, désignée par son identifiant GED (externe_id) : la GED, elle, est
-# interrogée avec le numéro de l'affaire.
+# Fiche GED d'une affaire, désignée par son identifiant GED (l'id de l'entrepôt, ancien externe_id) :
+# la GED, elle, est interrogée avec le numéro de l'affaire.
 def case_detail(externe_id: str) -> GedResponse:
     with refonte_transaction() as connection:
-        found = queries.find_project_by_externe_id(connection, externe_id)
+        found = queries.find_project_by_ged_id(connection, externe_id)
 
     if found is None:
         raise NotFound(f"Affaire introuvable : {externe_id}")
@@ -134,9 +131,14 @@ def case_file(project_number: str, file_name: str) -> GedResponse:
     return sources.case_file(project_number, file_name)
 
 
-def distinct_values(column: str) -> list[str]:
+def business_codes() -> list[str]:
     with refonte_transaction() as connection:
-        return queries.distinct_values(connection, column)
+        return queries.business_codes(connection)
+
+
+def agencies() -> list[str]:
+    with refonte_transaction() as connection:
+        return queries.agencies(connection)
 
 
 def labels(reference: str) -> list[tuple[int, str]]:

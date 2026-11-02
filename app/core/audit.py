@@ -1,5 +1,5 @@
 # Audit : trace chaque requête métier (qui, quoi, comment, quand) dans le journal du jour et
-# dans la table audit_log de la base MySQL. Branché comme middleware dans main.py.
+# dans la table usage_logs de la base métier (migration 0024). Branché comme middleware dans main.py.
 
 import logging
 import re
@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.logger import logger, request_id
 from app.core.timing import timings
-from app.database.connection import execute_audit
+from app.database.connection import execute_usage_log
 
 # Chemins non tracés : sonde, documentation et fichiers techniques du navigateur.
 IGNORED_PATHS = {"/", "/api/health", "/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json", "/favicon.ico"}
@@ -24,14 +24,15 @@ IGNORED_PATH_PATTERN = re.compile(r"^/layer-catalog/[^/]+/tiles/")
 # Au-delà de 10 Ko, le corps de la requête n'est pas recopié dans l'audit.
 MAX_BODY_SIZE = 10_000
 
-# Requête paramétrée (:nom) : les valeurs ne sont jamais concaténées dans le SQL.
+# Requête paramétrée (:nom) : les valeurs ne sont jamais concaténées dans le SQL. request_id et
+# details arrivent en texte : CAST les convertit vers les types de la colonne (uuid, jsonb).
 INSERT = """
-    INSERT INTO audit_log
+    INSERT INTO usage_logs
         (created_at, request_id, username, action, method, path, status_code, duration_ms,
          ip_address, user_agent, details)
     VALUES
-        (:created_at, :request_id, :username, :action, :method, :path, :status_code, :duration_ms,
-         :ip_address, :user_agent, :details)
+        (:created_at, CAST(:request_id AS uuid), :username, :action, :method, :path, :status_code, :duration_ms,
+         :ip_address, :user_agent, CAST(:details AS jsonb))
 """
 
 
@@ -48,7 +49,8 @@ async def audit(request: Request, call_next) -> Response:
     # Dictionnaire que timed() remplira pendant la requête (auth, db, geojson…).
     steps: dict[str, float] = {}
     timings.set(steps)
-    created_at = datetime.now()
+    # Heure locale avec son fuseau : created_at est un timestamptz, la date ne dépend pas du serveur.
+    created_at = datetime.now().astimezone()
     started = time.perf_counter()
     # Lu avant l'exécution de la route : paramètres d'URL et corps JSON.
     details = await _request_details(request)
@@ -78,13 +80,13 @@ async def audit(request: Request, call_next) -> Response:
     return response
 
 
-# Écrit la ligne dans audit_log. Si la base d'audit est injoignable, l'erreur est seulement
+# Écrit la ligne dans usage_logs. Si la base est injoignable, l'erreur est seulement
 # journalisée : la requête de l'utilisateur a déjà abouti.
 def save(entry: dict[str, Any]) -> None:
     try:
-        execute_audit(INSERT, **entry)
+        execute_usage_log(INSERT, **entry)
     except Exception:
-        logger.exception("audit_log: could not save the entry")
+        logger.exception("usage_logs: could not save the entry")
 
 
 # Rassemble le « comment » de la requête : paramètres d'URL et corps JSON.
@@ -114,7 +116,7 @@ def _add_timings(details: dict[str, Any], steps: dict[str, float]) -> None:
         details["timings_ms"] = {step: round(duration) for step, duration in steps.items()}
 
 
-# Construit la ligne d'audit ; les clés correspondent aux paramètres :nom de INSERT.
+# Construit la ligne de usage_logs ; les clés correspondent aux paramètres :nom de INSERT.
 def _entry(
     request: Request, identifier: str, created_at: datetime, started: float, status_code: int, details: dict[str, Any]
 ) -> dict[str, Any]:

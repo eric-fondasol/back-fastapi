@@ -75,12 +75,12 @@ def relocate_survey(encoded_id: str, payload: dict[str, Any] = Depends(json_obje
 
 @router.get("/codes-metier")
 def codes_metier() -> list[str]:
-    return services.distinct_values("code_metier")
+    return services.business_codes()
 
 
 @router.get("/city-agencies")
 def city_agencies() -> list[str]:
-    return services.distinct_values("city_agency")
+    return services.agencies()
 
 
 @router.get("/project-types")
