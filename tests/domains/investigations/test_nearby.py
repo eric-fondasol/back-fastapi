@@ -22,6 +22,7 @@ def test_lists_the_investigations_within_200_m_nearest_first(client):
         ("PR.75GT.26.0001", "Châtelet", 73),
     ]
     assert all(len(item["uuid"]) == 36 for item in found)
+    assert (found[1]["longitude"], found[1]["latitude"]) == (2.3532, 48.8566)
 
 
 def test_finds_nothing_far_from_any_investigation(client):

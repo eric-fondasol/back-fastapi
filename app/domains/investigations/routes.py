@@ -43,7 +43,14 @@ def of_project(request: Request) -> list[dict[str, Any]]:
 def nearby(request: Request) -> list[dict[str, Any]]:
     longitude, latitude = entities.position(request.query_params.get("longitude"), request.query_params.get("latitude"))
     return [
-        {"uuid": found.uuid, "projectRef": found.project_ref, "name": found.name, "distance": found.distance_m}
+        {
+            "uuid": found.uuid,
+            "projectRef": found.project_ref,
+            "name": found.name,
+            "distance": found.distance_m,
+            "longitude": found.longitude,
+            "latitude": found.latitude,
+        }
         for found in services.nearby(longitude, latitude)
     ]
 

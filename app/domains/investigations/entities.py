@@ -94,6 +94,8 @@ class Nearby:
     project_ref: str
     name: str | None
     distance_m: int
+    longitude: float
+    latitude: float
 
 
 # Résultat de la recherche par numéro d'affaire ou par nom.

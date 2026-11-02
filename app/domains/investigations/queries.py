@@ -254,7 +254,7 @@ NEARBY_SQL = f"""
         FROM positioned
         WHERE latitude BETWEEN :minLat AND :maxLat AND longitude BETWEEN :minLng AND :maxLng
     )
-    SELECT uuid, project_ref, project_ref_commentaire, distance FROM measured
+    SELECT uuid, project_ref, project_ref_commentaire, distance, longitude, latitude FROM measured
     WHERE distance <= :radius ORDER BY distance, project_ref LIMIT :limit
 """
 
@@ -275,7 +275,10 @@ def nearby(connection: Connection, longitude: float, latitude: float, radius_m: 
             "limit": limit,
         },
     ).mappings()
-    return [Nearby(str(row["uuid"]), row["project_ref"], row["project_ref_commentaire"], round(row["distance"])) for row in rows]
+    return [
+        Nearby(str(row["uuid"]), row["project_ref"], row["project_ref_commentaire"], round(row["distance"]), row["longitude"], row["latitude"])
+        for row in rows
+    ]
 
 
 def _escape_like(value: str) -> str:
