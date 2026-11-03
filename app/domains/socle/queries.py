@@ -1,11 +1,9 @@
-# Le SQL du socle : paramétrage, annuaire des agences, statistiques, zones à accès restreint,
+# Le SQL du socle : paramétrage, annuaire des agences (business units), traces de recherche d'adresse,
 # images d'attente. Repris des dépôts Doctrine du contexte Socle du back Symfony.
-
-from datetime import datetime
 
 from sqlalchemy import Connection, bindparam, text
 
-from app.domains.socle.entities import AccessLimitedZone, AddressSearchTracing, Agency, Setting, WaitingImage
+from app.domains.socle.entities import AddressSearchTracing, Agency, Setting, WaitingImage
 
 
 # Le paramétrage est historisé : la ligne la plus récente fait foi.
@@ -20,17 +18,12 @@ def current_setting(connection: Connection) -> Setting | None:
     return Setting(row["email"] or "", row["message"] or "", row["url_manuel_utilisateur"] or "", row["horodatage"])
 
 
-def access_limited_zones(connection: Connection) -> list[AccessLimitedZone]:
-    rows = connection.execute(
-        text("SELECT id, description, latitude, longitude, zone_km FROM access_limited_zones ORDER BY id ASC")
-    ).mappings()
-    return [AccessLimitedZone(row["id"], row["description"], row["latitude"], row["longitude"], row["zone_km"]) for row in rows]
-
-
-# Agence de l'agent, d'après son adresse (table email_services, sans tenir compte de la casse).
+# Depuis le schéma v3 (migration 0020), l'agence d'un agent est sa business unit (users.business_unit_code,
+# écrite à la connexion), et les agences qui couvrent un département sont celles de
+# departments.business_unit_codes (codes séparés par « | »). L'accès général est business_units.full_access (0023).
 def service_code_of(connection: Connection, email: str) -> str | None:
     code = connection.execute(
-        text("SELECT service_code FROM email_services WHERE LOWER(id) = LOWER(:email) LIMIT 1"), {"email": email}
+        text("SELECT business_unit_code FROM users WHERE LOWER(email) = LOWER(:email) LIMIT 1"), {"email": email}
     ).scalar()
     return code or None
 
@@ -39,30 +32,24 @@ def agency(connection: Connection, code: str | None) -> Agency | None:
     if not code:
         return None
 
-    row = connection.execute(text("SELECT id, libelle, full_access FROM services WHERE id = :code"), {"code": code}).mappings().first()
+    row = connection.execute(text("SELECT code, libelle, full_access FROM business_units WHERE code = :code"), {"code": code}).mappings().first()
     return _agency(row) if row else None
 
 
 def codes_covering_department(connection: Connection, department: str) -> list[str]:
-    return [
-        str(code)
-        for code in connection.execute(
-            text("SELECT service FROM service_departments WHERE department = :department"), {"department": department}
-        ).scalars()
-    ]
+    codes = connection.execute(text("SELECT business_unit_codes FROM departments WHERE id = :department"), {"department": department}).scalar()
+    return [code for code in (codes or "").split("|") if code]
 
 
-# Agences principales d'un département (departments.code_service, codes séparés par « | »),
-# dans l'ordre de cette liste.
+# Agences d'un département, dans l'ordre de departments.business_unit_codes.
 def main_agencies_of_department(connection: Connection, department: str) -> list[Agency]:
-    codes = connection.execute(text("SELECT code_service FROM departments WHERE id = :department"), {"department": department}).scalar()
-    code_list = [code for code in (codes or "").split("|") if code]
+    code_list = codes_covering_department(connection, department)
 
     if not code_list:
         return []
 
-    statement = text("SELECT id, libelle, full_access FROM services WHERE id IN :codes").bindparams(bindparam("codes", expanding=True))
-    by_code = {row["id"]: _agency(row) for row in connection.execute(statement, {"codes": code_list}).mappings()}
+    statement = text("SELECT code, libelle, full_access FROM business_units WHERE code IN :codes").bindparams(bindparam("codes", expanding=True))
+    by_code = {row["code"]: _agency(row) for row in connection.execute(statement, {"codes": code_list}).mappings()}
     return [by_code[code] for code in code_list if code in by_code]
 
 
@@ -90,16 +77,6 @@ def add_address_search_tracing(connection: Connection, tracing: AddressSearchTra
             "recorded_at": tracing.recorded_at,
         },
     ).scalar_one()
-
-
-def add_visit(connection: Connection, label: str, at: datetime, service_code: str | None, email: str, tracing_id: int | None) -> None:
-    connection.execute(
-        text(
-            "INSERT INTO statistique_visites (libelle, horodatage, service_code, user_email, address_search_tracing_id) "
-            "VALUES (:label, :at, :service_code, :email, :tracing_id)"
-        ),
-        {"label": label, "at": at, "service_code": service_code, "email": email, "tracing_id": tracing_id},
-    )
 
 
 def waiting_images(connection: Connection) -> list[WaitingImage]:
@@ -132,7 +109,7 @@ def remove_waiting_image(connection: Connection, image_id: int) -> None:
 
 
 def _agency(row) -> Agency:
-    return Agency(str(row["id"]), row["libelle"] or "", bool(row["full_access"]))
+    return Agency(str(row["code"]), row["libelle"] or "", bool(row["full_access"]))
 
 
 def _image(row) -> WaitingImage:

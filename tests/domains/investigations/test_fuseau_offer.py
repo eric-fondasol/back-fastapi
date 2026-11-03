@@ -115,7 +115,7 @@ def test_the_answer_is_kept_with_each_version_and_asked_again_for_the_next(clien
         ("44EN", 40, DATA_AT_PARIS),
         ("31GT", 24, DATA_AT_PARIS),
         ("31GT", 40, '{"coordinates":null}'),
-        ("31GT", 40, "contenu sans position"),
+        ("31GT", 40, '{"note":"contenu sans position"}'),
     ],
 )
 def test_saves_without_answer_when_the_rule_does_not_apply(client, refonte_database, surveys, department, count, data):

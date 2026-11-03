@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import orjson
 import pytest
@@ -12,7 +12,6 @@ from app.core import audit
 from app.core.audit import save as real_save
 from app.core.config import config
 from app.core.logger import DailyFileHandler
-from app.database.connection import audit_engine
 from app.main import app
 
 DEV_TOKEN = "dev-token-" + "x" * 32
@@ -30,7 +29,7 @@ def client(monkeypatch):
 
 def entry(**overrides):
     return {
-        "created_at": datetime.now(),
+        "created_at": datetime.now().astimezone(),
         "request_id": str(uuid.uuid4()),
         "username": "test@fondasol.fr",
         "action": "search_sites_by_area",
@@ -45,7 +44,7 @@ def entry(**overrides):
 
 
 def test_a_request_is_recorded_with_who_what_how_and_when(client, audit_entries):
-    before = datetime.now()
+    before = datetime.now().astimezone()
     response = client.post("/searchSitesByArea", json=ATLANTIC, headers={"Authorization": f"Bearer {DEV_TOKEN}"})
 
     assert response.status_code == 200
@@ -66,7 +65,7 @@ def test_a_request_is_recorded_with_who_what_how_and_when(client, audit_entries)
     assert set(details["timings_ms"]) == {"auth", "db", "geojson"}
     assert all(duration >= 0 for duration in details["timings_ms"].values())
     assert sum(details["timings_ms"].values()) <= recorded["duration_ms"] + 2
-    assert before <= recorded["created_at"] <= datetime.now()
+    assert before <= recorded["created_at"] <= datetime.now().astimezone()
     assert response.headers["X-Request-ID"] == recorded["request_id"]
 
 
@@ -97,7 +96,7 @@ def test_an_unavailable_audit_database_does_not_break_the_request(client, monkey
     def unavailable(*_, **__):
         raise ConnectionError("audit database is down")
 
-    monkeypatch.setattr(audit, "execute_audit", unavailable)
+    monkeypatch.setattr(audit, "execute_usage_log", unavailable)
     monkeypatch.setattr(audit, "save", real_save)
 
     response = client.post("/searchSitesByArea", json=ATLANTIC, headers={"Authorization": f"Bearer {DEV_TOKEN}"})
@@ -105,24 +104,39 @@ def test_an_unavailable_audit_database_does_not_break_the_request(client, monkey
     assert response.status_code == 200
 
 
-def test_an_entry_is_saved_in_the_audit_database():
+def test_an_entry_is_saved_in_usage_logs(refonte_database):
     saved = entry()
 
     real_save(saved)
 
-    with audit_engine.begin() as connection:
+    with refonte_database.connect() as connection:
         row = connection.execute(
-            text("SELECT username, action, status_code, details FROM audit_log WHERE request_id = :request_id"),
-            {"request_id": saved["request_id"]},
+            text(
+                "SELECT created_at, request_id::text AS request_id, username, action, method, path, status_code, "
+                "duration_ms, ip_address, user_agent, details FROM usage_logs"
+            )
         ).one()
-        connection.execute(
-            text("DELETE FROM audit_log WHERE request_id = :request_id"), {"request_id": saved["request_id"]}
-        )
 
+    assert abs(row.created_at - saved["created_at"]) < timedelta(milliseconds=1)
+    assert row.request_id == saved["request_id"]
     assert row.username == "test@fondasol.fr"
     assert row.action == "search_sites_by_area"
+    assert row.method == "POST"
+    assert row.path == "/searchSitesByArea"
     assert row.status_code == 200
-    assert orjson.loads(row.details) == ATLANTIC
+    assert row.duration_ms == 12
+    assert row.ip_address == "127.0.0.1"
+    assert row.user_agent == "pytest"
+    assert row.details == ATLANTIC
+
+
+def test_an_entry_without_details_is_saved_with_an_empty_details(refonte_database):
+    real_save(entry(details=None, username=None, action=None))
+
+    with refonte_database.connect() as connection:
+        row = connection.execute(text("SELECT username, action, details FROM usage_logs")).one()
+
+    assert tuple(row) == (None, None, None)
 
 
 def test_the_log_file_is_named_after_the_day_of_the_event(tmp_path):

@@ -20,24 +20,25 @@ def current_setting() -> Setting | None:
         return queries.current_setting(connection)
 
 
+# Les zones à accès restreint ont été retirées avec le schéma v3 (migration 0020, table vide) : la route de
+# l'ancien contrat reste, et renvoie une liste vide.
 def access_limited_zones() -> list[AccessLimitedZone]:
-    with refonte_transaction() as connection:
-        return queries.access_limited_zones(connection)
+    return []
 
 
-# Une visite est rattachée au service de l'agent, s'il est connu de l'annuaire.
+# Une visite est rattachée au service de l'agent, s'il est connu de l'annuaire. Les statistiques de visite
+# ont été retirées avec le schéma v3 (migration 0020) : la réponse de l'ancien contrat est rendue, rien n'est stocké.
 def record_visit(label: str, email: str) -> tuple[str | None, datetime]:
     now = _now()
 
     with refonte_transaction() as connection:
         service_code = queries.service_code_of(connection, email)
-        queries.add_visit(connection, label, now, service_code, email, None)
 
     return service_code, now
 
 
 # Trace une recherche d'adresse : le département cherché, les agences qui le couvrent, et si
-# l'agent y est habilité. Une visite pointant vers cette trace est enregistrée en même temps.
+# l'agent y est habilité.
 def record_address_search(department: str, label: str, longitude: float, latitude: float, email: str) -> AddressSearchTracing:
     now = _now()
 
@@ -56,9 +57,7 @@ def record_address_search(department: str, label: str, longitude: float, latitud
             latitude=latitude,
             recorded_at=now,
         )
-        tracing = replace(tracing, id=queries.add_address_search_tracing(connection, tracing))
-        queries.add_visit(connection, label, now, agency_code, email, tracing.id)
-        return tracing
+        return replace(tracing, id=queries.add_address_search_tracing(connection, tracing))
 
 
 def waiting_images() -> list[WaitingImage]:

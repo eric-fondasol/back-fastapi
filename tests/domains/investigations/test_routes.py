@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -37,6 +38,10 @@ def create(client, body, identity=SPIKE):
     return send(client, "POST", "/investigations", body, identity, 201)
 
 
+def doc(value):
+    return json.dumps({"v": value}, ensure_ascii=False, separators=(",", ":"))
+
+
 def scalar(engine, sql, **parameters):
     with engine.connect() as connection:
         return connection.execute(text(sql), parameters).scalar()
@@ -59,42 +64,42 @@ def test_a_first_save_creates_the_investigation_and_its_version_1_in_the_user_na
 
 
 def test_a_new_version_leaves_the_previous_one_untouched(client):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": "v1"})["uuid"]
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": doc("v1")})["uuid"]
 
-    second = send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": "v2", "comment": "Rayon élargi"}, OTHER, 201)
+    second = send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": doc("v2"), "comment": "Rayon élargi"}, OTHER, 201)
 
     assert [second["version"]["version"], second["version"]["author"]["name"]] == [2, "Autre Test"]
     first = send(client, "GET", f"/investigations/{page_uuid}/versions/1")
-    assert [first["version"]["data"], first["latestVersion"]] == ["v1", 2]
-    assert send(client, "GET", f"/investigations/{page_uuid}")["version"]["data"] == "v2"
+    assert [first["version"]["data"], first["latestVersion"]] == [doc("v1"), 2]
+    assert send(client, "GET", f"/investigations/{page_uuid}")["version"]["data"] == doc("v2")
 
 
 def test_overwriting_the_latest_version_keeps_its_number(client, refonte_database):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": "v1"})["uuid"]
-    send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": "v2"}, expected=201)
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": doc("v1")})["uuid"]
+    send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": doc("v2")}, expected=201)
 
-    revised = send(client, "PUT", f"/investigations/{page_uuid}/versions/2", {"data": "v2 corrigée", "comment": "Faute"})
+    revised = send(client, "PUT", f"/investigations/{page_uuid}/versions/2", {"data": doc("v2 corrigée"), "comment": "Faute"})
 
     assert [revised["version"]["version"], revised["version"]["comment"]] == [2, "Faute"]
-    assert send(client, "GET", f"/investigations/{page_uuid}")["version"]["data"] == "v2 corrigée"
+    assert send(client, "GET", f"/investigations/{page_uuid}")["version"]["data"] == doc("v2 corrigée")
     assert scalar(refonte_database, "SELECT count(*) FROM saved_page_versions") == 2
 
 
 def test_an_earlier_version_cannot_be_overwritten(client):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": "v1"})["uuid"]
-    send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": "v2"}, expected=201)
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": doc("v1")})["uuid"]
+    send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": doc("v2")}, expected=201)
 
-    refusal = send(client, "PUT", f"/investigations/{page_uuid}/versions/1", {"data": "réécrite"}, expected=409)
+    refusal = send(client, "PUT", f"/investigations/{page_uuid}/versions/1", {"data": doc("réécrite")}, expected=409)
 
     assert "V2" in refusal["errors"]
-    assert send(client, "GET", f"/investigations/{page_uuid}/versions/1")["version"]["data"] == "v1"
+    assert send(client, "GET", f"/investigations/{page_uuid}/versions/1")["version"]["data"] == doc("v1")
 
 
 def test_each_investigation_of_a_project_numbers_its_own_versions(client):
-    rd613 = create(client, {"projectRef": "PR.34GT.26.0057", "name": "RD613", "data": "a"})["uuid"]
-    create(client, {"projectRef": "PR.34GT.26.0057", "name": "La Bourbou", "data": "b"})
-    create(client, {"projectRef": "PR.34GT.26.0058", "name": "Ailleurs", "data": "c"})
-    send(client, "POST", f"/investigations/{rd613}/versions", {"data": "a2"}, expected=201)
+    rd613 = create(client, {"projectRef": "PR.34GT.26.0057", "name": "RD613", "data": doc("a")})["uuid"]
+    create(client, {"projectRef": "PR.34GT.26.0057", "name": "La Bourbou", "data": doc("b")})
+    create(client, {"projectRef": "PR.34GT.26.0058", "name": "Ailleurs", "data": doc("c")})
+    send(client, "POST", f"/investigations/{rd613}/versions", {"data": doc("a2")}, expected=201)
 
     investigations = send(client, "GET", "/investigations?projectRef=PR.34GT.26.0057")
 
@@ -106,7 +111,7 @@ def test_each_investigation_of_a_project_numbers_its_own_versions(client):
 
 
 def test_renaming_an_investigation_applies_to_all_its_versions(client):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "name": "Ancien nom", "data": "v1"})["uuid"]
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "name": "Ancien nom", "data": doc("v1")})["uuid"]
 
     renamed = send(client, "PATCH", f"/investigations/{page_uuid}", {"name": "RD613"})
 
@@ -118,12 +123,14 @@ def test_renaming_an_investigation_applies_to_all_its_versions(client):
     "body",
     [
         {"projectRef": "63GT.24.0048", "data": "  "},
-        {"data": "v1"},
-        {"projectRef": "63GT.24.0048", "data": "v1", "comment": "x" * 2001},
-        {"projectRef": "x" * 101, "data": "v1"},
-        {"projectRef": "63GT.24.0048", "data": "v1", "name": 12},
+        {"projectRef": "63GT.24.0048", "data": "pas du JSON"},
+        {"projectRef": "63GT.24.0048", "data": "[1, 2]"},
+        {"data": doc("v1")},
+        {"projectRef": "63GT.24.0048", "data": doc("v1"), "comment": "x" * 2001},
+        {"projectRef": "x" * 101, "data": doc("v1")},
+        {"projectRef": "63GT.24.0048", "data": doc("v1"), "name": 12},
     ],
-    ids=["blank content", "no project", "comment too long", "project too long", "name not a string"],
+    ids=["blank content", "not JSON", "not an object", "no project", "comment too long", "project too long", "name not a string"],
 )
 def test_an_incomplete_save_is_refused(client, refonte_database, body):
     send(client, "POST", "/investigations", body, expected=400)
@@ -131,12 +138,12 @@ def test_an_incomplete_save_is_refused(client, refonte_database, body):
     assert scalar(refonte_database, "SELECT count(*) FROM saved_pages") == 0
 
 
-def test_content_sent_as_an_object_is_stored_as_json_text(client):
+def test_content_sent_as_an_object_is_stored_as_json(client):
     page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": {"coordinates": {"lat": 43.6, "lng": 1.4}, "nom": "Été"}})["uuid"]
 
     latest = send(client, "GET", f"/investigations/{page_uuid}")
 
-    assert latest["version"]["data"] == '{"coordinates":{"lat":43.6,"lng":1.4},"nom":"Été"}'
+    assert json.loads(latest["version"]["data"]) == {"coordinates": {"lat": 43.6, "lng": 1.4}, "nom": "Été"}
     assert latest["hasCoordinates"] is True
 
 
@@ -154,9 +161,9 @@ def test_content_sent_as_an_object_is_stored_as_json_text(client):
     ],
 )
 def test_an_unknown_investigation_or_version_answers_not_found(client, method, path):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": "v1"})["uuid"]
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": doc("v1")})["uuid"]
 
-    send(client, method, path.format(uuid=page_uuid), {"data": "x"} if method != "GET" else None, expected=404)
+    send(client, method, path.format(uuid=page_uuid), {"data": doc("x")} if method != "GET" else None, expected=404)
 
 
 def test_the_project_reference_is_required_to_list_investigations(client):
@@ -164,7 +171,7 @@ def test_the_project_reference_is_required_to_list_investigations(client):
 
 
 def test_deleting_an_account_keeps_its_versions_and_the_author_name(client, refonte_database):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": "v1"})["uuid"]
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": doc("v1")})["uuid"]
 
     with refonte_database.begin() as connection:
         connection.execute(text("DELETE FROM users WHERE email = 'spike@fondasol.fr'"))
@@ -172,21 +179,31 @@ def test_deleting_an_account_keeps_its_versions_and_the_author_name(client, refo
     assert send(client, "GET", f"/investigations/{page_uuid}")["version"]["author"] == {"id": None, "name": "Spike Test"}
 
 
-def test_saved_pages_data_always_follows_the_latest_version(client, refonte_database):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": "v1"})["uuid"]
-    send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": "v2"}, expected=201)
-    send(client, "PUT", f"/investigations/{page_uuid}/versions/2", {"data": "v2 bis"})
+def test_the_investigation_reads_the_content_of_its_latest_version(client, refonte_database):
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": doc("v1")})["uuid"]
+    send(client, "POST", f"/investigations/{page_uuid}/versions", {"data": doc("v2")}, expected=201)
+    send(client, "PUT", f"/investigations/{page_uuid}/versions/2", {"data": '{"coordinates":{"lng":1,"lat":2}}'})
 
-    assert scalar(refonte_database, "SELECT data FROM saved_pages WHERE uuid = :uuid", uuid=page_uuid) == "v2 bis"
+    assert send(client, "GET", f"/investigations/{page_uuid}")["hasCoordinates"] is True
     assert scalar(refonte_database, "SELECT email FROM saved_pages WHERE uuid = :uuid", uuid=page_uuid) == "spike@fondasol.fr"
 
 
+@pytest.mark.parametrize(("project_ref", "reference_type"), [("63GT.24.0048", 1), ("SQ.31GT.26.0007", 0)])
+def test_the_reference_is_typed_and_the_author_linked(client, refonte_database, project_ref, reference_type):
+    page_uuid = create(client, {"projectRef": project_ref, "data": doc("v1")})["uuid"]
+
+    assert scalar(refonte_database, "SELECT type_reference FROM saved_pages WHERE uuid = :uuid", uuid=page_uuid) == reference_type
+    assert scalar(refonte_database, "SELECT u.email FROM saved_pages p JOIN users u ON u.id = p.user_id WHERE p.uuid = :uuid", uuid=page_uuid) == (
+        "spike@fondasol.fr"
+    )
+
+
 def test_simultaneous_saves_never_share_a_version_number(client, refonte_database):
-    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": "v1"})["uuid"]
+    page_uuid = create(client, {"projectRef": "63GT.24.0048", "data": doc("v1")})["uuid"]
     profile = current_profile(SPIKE)
 
     with ThreadPoolExecutor(max_workers=6) as pool:
-        saved = list(pool.map(lambda index: services.add_version(profile, page_uuid, f"v{index}", None, None)[1].number, range(12)))
+        saved = list(pool.map(lambda index: services.add_version(profile, page_uuid, doc(f"v{index}"), None, None)[1].number, range(12)))
 
     assert sorted(saved) == list(range(2, 14))
     assert scalar(refonte_database, "SELECT max(version) FROM saved_page_versions") == 13

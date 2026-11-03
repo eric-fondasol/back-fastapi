@@ -69,10 +69,16 @@ def save_preferences(connection: Connection, user_id: str, preferences: Preferen
     )
 
 
+# Les affaires favorites sont rangées par id de l'entrepôt (projects.id depuis le schéma v3), mais l'API
+# les désigne toujours par leur n° (project_number) : la traduction se fait ici.
 def favorite_project_ids(connection: Connection, user_id: str) -> list[str]:
     return list(
         connection.execute(
-            text("SELECT project_id FROM user_favorite_projects WHERE user_id = :user_id ORDER BY created_at, project_id"),
+            text(
+                "SELECT project.project_number FROM user_favorite_projects favorite "
+                "JOIN projects project ON project.id = favorite.project_id "
+                "WHERE favorite.user_id = :user_id ORDER BY favorite.created_at, project.project_number"
+            ),
             {"user_id": user_id},
         ).scalars()
     )
@@ -96,14 +102,14 @@ def favorite_addresses(connection: Connection, user_id: str) -> list[FavoriteAdd
 
 
 def project_exists(connection: Connection, project_id: str) -> bool:
-    return connection.execute(text("SELECT 1 FROM projects WHERE id = :id"), {"id": project_id}).first() is not None
+    return connection.execute(text("SELECT 1 FROM projects WHERE project_number = :number"), {"number": project_id}).first() is not None
 
 
 def add_favorite_project(connection: Connection, user_id: str, project_id: str, at: datetime) -> None:
     connection.execute(
         text(
             "INSERT INTO user_favorite_projects (user_id, project_id, created_at) "
-            "VALUES (:user_id, :project_id, :at) ON CONFLICT DO NOTHING"
+            "SELECT :user_id, id, :at FROM projects WHERE project_number = :project_id ON CONFLICT DO NOTHING"
         ),
         {"user_id": user_id, "project_id": project_id, "at": at},
     )
@@ -111,7 +117,10 @@ def add_favorite_project(connection: Connection, user_id: str, project_id: str, 
 
 def remove_favorite_project(connection: Connection, user_id: str, project_id: str) -> None:
     connection.execute(
-        text("DELETE FROM user_favorite_projects WHERE user_id = :user_id AND project_id = :project_id"),
+        text(
+            "DELETE FROM user_favorite_projects WHERE user_id = :user_id "
+            "AND project_id IN (SELECT id FROM projects WHERE project_number = :project_id)"
+        ),
         {"user_id": user_id, "project_id": project_id},
     )
 
@@ -196,7 +205,9 @@ def _address(row: Any) -> FavoriteAddress:
     )
 
 
-USER_LAYER_COLUMNS = "id, name, kind, url, params, created_at, original_name, west, south, east, north, style"
+# Depuis le schéma v3 (migration 0019), l'emprise d'un fichier n'est plus stockée : elle est calculée à
+# l'import et renvoyée avec la couche ajoutée, seul moment où le front s'en sert (cadrage sur le fichier).
+USER_LAYER_COLUMNS = "id, name, kind, url, params, created_at, original_name, style"
 
 
 def user_layers(connection: Connection, user_id: str) -> list[UserLayer]:
@@ -216,10 +227,9 @@ def add_user_layer(connection: Connection, user_id: str, layer: UserLayer) -> No
         text(
             """
             INSERT INTO user_layers
-                (id, user_id, name, kind, url, params, geojson, original_name, west, south, east, north, created_at, updated_at)
+                (id, user_id, name, kind, url, params, geojson, original_name, created_at, updated_at)
             VALUES
-                (:id, :user_id, :name, :kind, :url, CAST(:params AS jsonb), CAST(:geojson AS jsonb), :original_name,
-                 :west, :south, :east, :north, :at, :at)
+                (:id, :user_id, :name, :kind, :url, CAST(:params AS jsonb), CAST(:geojson AS jsonb), :original_name, :at, :at)
             """
         ),
         {
@@ -231,7 +241,6 @@ def add_user_layer(connection: Connection, user_id: str, layer: UserLayer) -> No
             "params": json.dumps(layer.params),
             "geojson": None if layer.geojson is None else json.dumps(layer.geojson, separators=(",", ":")),
             "original_name": layer.original_name,
-            **dict(zip(["west", "south", "east", "north"], layer.bounds or (None, None, None, None))),
             "at": layer.created_at,
         },
     )
@@ -284,7 +293,6 @@ def remove_user_layer(connection: Connection, user_id: str, layer_uuid: str, lay
 
 
 def _user_layer(row: Any) -> UserLayer:
-    bounds = (row["west"], row["south"], row["east"], row["north"])
     return UserLayer(
         str(row["id"]),
         row["name"],
@@ -293,7 +301,7 @@ def _user_layer(row: Any) -> UserLayer:
         dict(row["params"]),
         row["created_at"].astimezone(UTC),
         row["original_name"],
-        None if None in bounds else bounds,
+        None,
         style=dict(row["style"]),
     )
 

@@ -22,24 +22,43 @@ def client(refonte_database):
     app.dependency_overrides.clear()
 
 
-def add_project(engine, project_id, position=PARIS, **columns):
-    values = {"id": project_id, "is_doc_ged": False, "longitude": position and position[0], "latitude": position and position[1]} | columns
-    names = [name for name in values if name not in ("longitude", "latitude")]
+# Schéma v3 : l'affaire a l'id de l'entrepôt (ici « key-<n°> ») et son n° dans project_number ; sa
+# position est celle de ses sites. Une position donnée crée un site sous le n° de l'affaire, comme
+# pour la plupart des affaires réelles ; agence et métier passent par business_units et project_business_lines.
+def key(project_number):
+    return f"key-{project_number}"
+
+
+def add_project(engine, project_number, position=PARIS, name=None, city_agency=None, code_metier=None, altitude=None, **columns):
+    values = {"id": key(project_number), "project_number": project_number, "is_doc_ged": False, "project_description": name} | columns
+    with engine.begin() as connection:
+        if city_agency is not None:
+            connection.execute(
+                text("INSERT INTO business_units (code, libelle) VALUES (:code, :code) ON CONFLICT DO NOTHING"), {"code": city_agency}
+            )
+            values["business_unit_code"] = city_agency
+        connection.execute(text(f"INSERT INTO projects ({', '.join(values)}) VALUES ({', '.join(':' + name for name in values)})"), values)
+        if code_metier is not None:
+            connection.execute(
+                text("INSERT INTO business_lines (code, label_fr) VALUES (:code, :code) ON CONFLICT DO NOTHING"), {"code": code_metier}
+            )
+            connection.execute(
+                text("INSERT INTO project_business_lines (project_id, business_line_code) VALUES (:key, :code)"),
+                {"key": key(project_number), "code": code_metier},
+            )
+    if position is not None:
+        add_site(engine, project_number, project_number, position, altitude)
+
+
+def add_site(engine, site_id, project_number, position=PARIS, altitude=None):
     with engine.begin() as connection:
         connection.execute(
             text(
-                f"INSERT INTO projects ({', '.join(names)}, geometry) VALUES ({', '.join(':' + name for name in names)}, "
-                f"{queries._point_sql('longitude', 'latitude')})"
+                "INSERT INTO sites (id, project_id, altitude, geometry) "
+                f"VALUES (:id, :project_id, :altitude, {queries._point_sql('longitude', 'latitude')})"
             ),
-            values,
-        )
-
-
-def add_site(engine, site_id, project_id, position=PARIS):
-    with engine.begin() as connection:
-        connection.execute(
-            text(f"INSERT INTO sites (id, project_id, geometry) VALUES (:id, :project_id, {queries._point_sql('longitude', 'latitude')})"),
-            {"id": site_id, "project_id": project_id} | queries._position_parameters(None if position is None else _coordinates(position)),
+            {"id": site_id, "project_id": key(project_number), "altitude": altitude}
+            | queries._position_parameters(None if position is None else _coordinates(position)),
         )
 
 
@@ -78,7 +97,10 @@ def scalar(engine, sql, **parameters):
 
 @pytest.fixture
 def bastille(refonte_database):
-    add_project(refonte_database, "A-2026-001", name="Chantier Bastille", city="PARIS", city_agency="IDF", code_metier="G2", client="VINCI", is_doc_ged=True)
+    add_project(
+        refonte_database, "A-2026-001", position=None, name="Chantier Bastille", city="PARIS", city_agency="IDF", code_metier="G2", client="VINCI",
+        is_doc_ged=True,
+    )
     add_site(refonte_database, "S-1", "A-2026-001")
     add_survey(refonte_database, "SV-1", "S-1")
     add_survey(refonte_database, "SV-2", "S-1", position=None)
@@ -110,7 +132,7 @@ def test_the_project_sheet_has_no_guessed_status(client, bastille):
 
 
 def test_the_project_sheet_counts_its_sites_and_the_list_does_not(client, bastille):
-    add_project(bastille, "SANS-CHANTIER")
+    add_project(bastille, "SANS-CHANTIER", position=None)
 
     assert client.get("/projects/A-2026-001").json()["SiteCount"] == 1
     assert client.get("/projects/SANS-CHANTIER").json()["SiteCount"] == 0
@@ -321,9 +343,21 @@ def test_relocating_a_project_saves_altitude_and_moves_its_sites(client, bastill
     assert response.status_code == 200
     assert response.json()["Latitude"] == pytest.approx(45.7640)
     assert response.json()["UpdatedAt"].endswith("+00:00")
-    assert scalar(bastille, "SELECT altitude FROM projects WHERE id = 'A-2026-001'") == pytest.approx(172.5)
+    assert response.json()["Altitude"] == pytest.approx(172.5)
+    assert scalar(bastille, "SELECT altitude FROM sites WHERE id = 'S-1'") == pytest.approx(172.5)
     assert scalar(bastille, "SELECT ST_Y(geometry) FROM sites WHERE id = 'S-1'") == pytest.approx(45.7640)
-    assert scalar(bastille, "SELECT fiability FROM sites WHERE id = 'S-1'") == 1
+    assert scalar(bastille, "SELECT latitude FROM sites WHERE id = 'S-1'") == pytest.approx(45.7640)
+    assert scalar(bastille, "SELECT fiab_geo_sites FROM sites WHERE id = 'S-1'") == 1
+
+
+def test_relocating_a_project_without_site_gives_it_one_under_its_number(client, refonte_database):
+    add_project(refonte_database, "IP.09.0001", position=None)
+
+    response = client.put(f"/projects/{encoded('IP.09.0001')}", json={"Latitude": 45.7640, "Longitude": 4.8357, "Altitude": 172.5})
+
+    assert (response.json()["Latitude"], response.json()["Altitude"]) == pytest.approx((45.7640, 172.5))
+    assert client.get("/projects/IP.09.0001").json()["SiteCount"] == 1
+    assert scalar(refonte_database, "SELECT project_id FROM sites WHERE id = 'IP.09.0001'") == key("IP.09.0001")
 
 
 def test_a_reason_marks_a_project_not_geolocatable_without_moving_it(client, bastille):
@@ -386,9 +420,14 @@ def test_the_ged_presence_is_declared_by_hand_and_traced(client, bastille):
     assert response.json()["IsDocGed"] is False
     assert response.json()["IsDocGedUpdatedBy"] == "test@fondasol.fr"
     assert response.json()["IsDocGedUpdatedAt"].endswith("+00:00")
-    assert scalar(bastille, "SELECT is_doc_ged FROM projects WHERE id = 'A-2026-001'") is False
-    assert scalar(bastille, "SELECT is_doc_ged_updated_by FROM projects WHERE id = 'A-2026-001'") == "test@fondasol.fr"
-    assert scalar(bastille, "SELECT updated_at FROM projects WHERE id = 'A-2026-001'") is None
+    assert scalar(bastille, "SELECT is_doc_ged FROM projects WHERE project_number = 'A-2026-001'") is False
+    assert scalar(bastille, "SELECT updated_at FROM projects WHERE project_number = 'A-2026-001'") is None
+    with bastille.connect() as connection:
+        change = connection.execute(
+            text("SELECT project_id, is_doc_ged_old_value, is_doc_ged_new_value, user_email FROM docs_ged_changes")
+        ).one()
+    assert tuple(change) == (key("A-2026-001"), True, False, "test@fondasol.fr")
+    assert client.get("/projects/A-2026-001").json()["IsDocGedUpdatedBy"] == "test@fondasol.fr"
     assert ids(client, "?selectedGeds=2") == ["A-2026-001"]
 
 
@@ -416,6 +455,8 @@ def test_a_survey_added_to_a_project_is_created_on_its_site(client, bastille):
     assert scalar(bastille, "SELECT site_id FROM surveys WHERE id = 'A-2026-001_NvS1'") == "S-1"
     assert scalar(bastille, "SELECT altitude FROM surveys WHERE id = 'A-2026-001_NvS1'") == pytest.approx(35.5)
     assert scalar(bastille, "SELECT ST_Y(geometry) FROM surveys WHERE id = 'A-2026-001_NvS1'") == pytest.approx(48.8570)
+    assert scalar(bastille, "SELECT name FROM surveys WHERE id = 'A-2026-001_NvS1'") == "NvS1"
+    assert scalar(bastille, "SELECT latitude FROM surveys WHERE id = 'A-2026-001_NvS1'") == pytest.approx(48.8570)
 
 
 def test_a_survey_already_present_is_not_created_twice(client, bastille):
@@ -435,7 +476,7 @@ def test_a_survey_with_an_invalid_name_or_without_position_is_refused(client, ba
 
 
 def test_a_survey_cannot_be_added_to_an_unknown_project_or_one_without_site(client, bastille):
-    add_project(bastille, "SANS-CHANTIER")
+    add_project(bastille, "SANS-CHANTIER", position=None)
     body = {"Name": "S1", "Latitude": 48.8, "Longitude": 2.3}
 
     assert client.post("/projects/INCONNUE/surveys", json=body).status_code == 404
@@ -443,7 +484,7 @@ def test_a_survey_cannot_be_added_to_an_unknown_project_or_one_without_site(clie
 
 
 def test_a_project_number_with_a_slash_is_reachable(client, refonte_database):
-    add_project(refonte_database, "PR.GT01.25.0082 / DE-16511")
+    add_project(refonte_database, "PR.GT01.25.0082 / DE-16511", position=None)
     add_site(refonte_database, "S-1", "PR.GT01.25.0082 / DE-16511")
     path = "/projects/PR.GT01.25.0082%20%2F%20DE-16511"
 

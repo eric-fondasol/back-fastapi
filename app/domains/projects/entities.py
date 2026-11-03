@@ -60,9 +60,12 @@ class EnteredPosition:
     geodetic_system: str | None = None
 
 
+# id est le n° d'affaire, sous lequel l'API désigne l'affaire ; key est l'id de l'entrepôt (projects.id
+# depuis le schéma v3), qui relie l'affaire à ses sites, métiers et traces GED.
 @dataclass(frozen=True)
 class Project:
     id: str
+    key: str | None = None
     name: str | None = None
     coordinates: Coordinates | None = None
     no_geo_reason_id: int | None = None
@@ -97,6 +100,7 @@ class Survey:
     id: str
     site_id: str
     coordinates: Coordinates | None = None
+    name: str | None = None
     no_geo_reason_id: int | None = None
     city: str | None = None
     altitude: float | None = None
@@ -199,11 +203,14 @@ class GedFilter(Enum):
 # Colonnes de tri proposées par l'écran Projets (liste fermée : jamais de SQL venu de la requête).
 SORT_COLUMNS = {
     "number": None,
-    "name": "p.name",
+    "name": "p.project_description",
     "city": "p.city",
     "client": "p.client",
-    "agency": "p.city_agency",
-    "businessCode": "p.code_metier",
+    "agency": "unit.libelle",
+    "businessCode": (
+        "(SELECT string_agg(line.business_line_code, ', ' ORDER BY line.business_line_code) "
+        "FROM project_business_lines line WHERE line.project_id = p.id)"
+    ),
 }
 
 

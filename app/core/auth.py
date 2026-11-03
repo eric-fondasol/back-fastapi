@@ -73,7 +73,7 @@ def current_identity(request: Request, credentials: HTTPAuthorizationCredentials
     with timed("auth"):
         identity = verified_identity(credentials)
 
-    # Rendu disponible au middleware d'audit (core/audit.py), qui l'écrit dans audit_log.username.
+    # Rendu disponible au middleware d'audit (core/audit.py), qui l'écrit dans usage_logs.username.
     request.state.username = identity.username
     return identity
 

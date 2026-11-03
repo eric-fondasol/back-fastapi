@@ -66,13 +66,6 @@ class Config(BaseSettings):
     nav_username: str | None = None
     nav_password: SecretStr | None = None
 
-    # Base MySQL d'audit (table audit_log).
-    db_audit_host: str
-    db_audit_port: int = 3306
-    db_audit_name: str
-    db_audit_user: str
-    db_audit_password: SecretStr
-
     # Dossier des journaux texte (un fichier par jour).
     log_dir: str = "logs"
 

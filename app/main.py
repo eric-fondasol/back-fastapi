@@ -44,7 +44,7 @@ app.add_middleware(
 )
 # Une erreur métier levée par un service (core/errors.py) devient une réponse 400, 404, 409…
 app.add_exception_handler(DomainError, domain_error_response)
-# Trace chaque requête (qui, quoi, comment, quand) dans le journal du jour et la table audit_log.
+# Trace chaque requête (qui, quoi, comment, quand) dans le journal du jour et la table usage_logs.
 app.middleware("http")(audit)
 
 # Vérification du jeton (core/auth.py), exécutée avant chaque route des routeurs qui la reçoivent.

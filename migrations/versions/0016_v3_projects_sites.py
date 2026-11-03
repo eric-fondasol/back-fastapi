@@ -12,6 +12,8 @@ no_docs_ged_reasons : créée vide, liste à fournir par le métier.
 sites : fiability devient fiab_geo_sites ; latitude et longitude reprises de geometry (sinon de la
 position saisie de l'affaire, si elle est en WGS 84), altitude de l'affaire ; geoloc_project_status créée
 vide (le back le calcule aujourd'hui) ; updated_at retirée.
+Une affaire positionnée sans site reçoit un site sous son n°, avec sa position et son altitude (ajouté le
+02/11/2026 : la première version perdait ces positions).
 
 Pas de retour arrière : restaurer le dump pris avant le basculement.
 """
@@ -131,6 +133,18 @@ def upgrade() -> None:
         """
     )
     op.execute("UPDATE sites s SET altitude = p.altitude FROM projects p WHERE s.project_id = p.id AND p.altitude IS NOT NULL")
+    # Affaire positionnée sans site : sa position et son altitude passent dans un site créé sous son n°, sans
+    # quoi le retrait de projects.geometry les perdrait (8 372 affaires de la base locale le 02/11/2026).
+    op.execute(
+        """
+        INSERT INTO sites (id, project_id, geometry, longitude, latitude, altitude)
+        SELECT p.project_number, p.id, p.geometry, ST_X(p.geometry), ST_Y(p.geometry), p.altitude
+        FROM projects p
+        WHERE p.geometry IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM sites s WHERE s.project_id = p.id)
+        ON CONFLICT (id) DO NOTHING
+        """
+    )
     op.execute("ALTER TABLE sites DROP COLUMN updated_at")
 
     op.execute(f"ALTER TABLE projects {', '.join(f'DROP COLUMN {column}' for column in RETIRED_PROJECT_COLUMNS)}")

@@ -94,12 +94,12 @@ back-fastapi/
 │   │   ├── logger.py                    journal : un fichier texte par jour dans logs/
 │   │   ├── warmup.py                    au démarrage : clés Azure et connexions à la base prêtes
 │   │   ├── timing.py                    chronomètre les étapes d'une requête (base, GeoJSON…)
-│   │   ├── audit.py                     trace chaque requête (qui, quoi, comment, quand) dans le journal et la base d'audit
+│   │   ├── audit.py                     trace chaque requête (qui, quoi, comment, quand) dans le journal et usage_logs
 │   │   ├── errors.py                    erreurs métier (NotFound, Conflict…) et leur code HTTP
 │   │   ├── body.py                      lecture d'un corps JSON contrôlé par les règles métier (400)
 │   │   └── profile.py                   profil de l'agent connecté dans la base métier (table users)
 │   ├── database/                        accès aux bases, partagé par tous les domaines
-│   │   └── connection.py                connexions à apisolscore, à la base métier et à la base d'audit
+│   │   └── connection.py                connexions à apisolscore et à la base métier
 │   └── domains/                         métier
 │       ├── profile/                     profil de l'agent connecté : préférences et favoris → /me/…
 │       ├── projects/                    affaires, sondages, repositionnement, référentiels, GED → /projects/…
@@ -559,6 +559,28 @@ docker compose exec api alembic upgrade head
 Les tests des migrations reconstruisent la base de test jusqu'à une révision (fixture `schema_at`
 de `tests/migrations/conftest.py`) plutôt que de redescendre depuis `head`.
 
+**Code adapté au schéma v3/v4** (branche `feat/db-v3-code`, 02/11/2026). Le contrat des routes ne
+change pas ; le code fait la correspondance :
+
+| Avant | Schéma v3/v4 |
+|---|---|
+| `projects.id` = n° d'affaire | `projects.project_number` ; `projects.id` est l'id de l'entrepôt, utilisé pour les jointures (sites, métiers, favoris, GED). L'API désigne toujours une affaire par son n° (`ID`) |
+| `projects.name` | `projects.project_description` |
+| `projects.geometry`, `altitude` | position et altitude du premier site positionné de l'affaire (de préférence celui qui porte son n°) |
+| `projects.city_agency` | libellé de la business unit (`business_units.libelle` par `projects.business_unit_code`) |
+| `projects.code_metier` | métiers de `project_business_lines`, joints par « , » |
+| `externe_id` (identifiant GED) | `projects.id` |
+| `is_doc_ged_updated_by` / `_at` | dernière ligne de `docs_ged_changes`, écrite à chaque déclaration manuelle |
+| position saisie (`longitude_saisie`…), `user_email`, `uuid`, `url_id`, `surveys.city` | retirés : champs de l'ancien contrat rendus vides |
+| `saved_pages.project_ref`, `data` | `saved_pages.reference` (+ `type_reference`, `user_id`) ; contenu lu dans la dernière version (`jsonb`) |
+| emprise d'une couche fichier (`west`…`north`) | calculée à l'import, renvoyée à l'ajout seulement (`bounds` vaut `null` ensuite) |
+| `services`, `email_services`, `service_departments` | `users.business_unit_code`, `departments.business_unit_codes`, `business_units.full_access` (révision `0023`) |
+| `statistique_visites`, `access_limited_zones` | retirées : la visite n'est plus stockée, les zones renvoient `[]` |
+
+Repositionner une affaire sans site lui en crée un sous son n°. La révision `0016` crée de même un site
+pour chaque affaire positionnée sans site (8 372 dans la base locale) : sa première version perdait
+ces positions ; une base déjà basculée avec elle se rebascule depuis le dump d'avant v3.
+
 Ajouter une révision : `docker compose exec api alembic revision -m "titre court"`, puis
 écrire `upgrade()` à la main avec `op.execute(...)` (pas d'autogénération : il n'y a pas de
 modèle SQLAlchemy).
@@ -705,12 +727,13 @@ valeur absente rendue par `""` ou `0`, dates RFC 3339 en UTC. Points à connaît
   (`PR.GT01.25.0082 / DE-16511`). Les routes utilisent `{…:path}` pour les accepter ; le back
   Symfony leur répondait 404.
 - **Repositionner une affaire** déplace tous ses chantiers au même point, marqués fiables
-  (`fiability = 1`). Une position efface le motif de non-géolocalisation. (0, 0) ou une
+  (`fiab_geo_sites = 1`), et leur donne l'altitude reçue ; une affaire sans chantier en reçoit un sous
+  son n°. Une position efface le motif de non-géolocalisation. (0, 0) ou une
   latitude nulle valent « pas de position ».
 - **Pressions et lithologies** des sondages : toujours `[]`, comme dans l'ancien contrat.
 
 **GED (`/case-detail`, `/case-file`)** — `projects/sources.py`, repris de HttpGedGateway du
-back Symfony. La fiche est cherchée par l'identifiant GED de l'affaire (`externe_id`), puis
+back Symfony. La fiche est cherchée par l'identifiant GED de l'affaire (l'id de l'entrepôt, `projects.id`), puis
 demandée à la GED avec le numéro de l'affaire. La réponse de la GED (statut, corps) est
 relayée en flux, avec trois en-têtes seulement : type, nom de fichier, taille. Une seconde
 tentative est faite après une erreur réseau, sauf un nom introuvable dans le DNS ; une
@@ -722,14 +745,15 @@ que la taille relayée reste juste.
 **Enquêtes enregistrées (`/investigations`)** — ADR-0032 du front, reprises du back Symfony :
 
 - une enquête (`saved_pages`) a des versions numérotées par enquête (`saved_page_versions`) ;
-  seule la dernière s'écrase. `saved_pages.data` reprend toujours le contenu de la dernière
-  version ;
+  seule la dernière s'écrase. Le contenu n'est que dans les versions (`jsonb`) : une enquête se lit
+  avec celui de sa dernière version ;
 - l'auteur d'une version est l'agent connecté (`current_profile`) : son identifiant, vidé si
   le compte est supprimé, et son nom, copié ;
 - chaque écriture verrouille l'enquête (`SELECT … FOR UPDATE`) : deux enregistrements
   simultanés ne prennent jamais le même numéro (un test lance 12 enregistrements en
   parallèle) ;
-- `data` est un texte ; envoyé en objet ou en liste JSON, il est enregistré en texte JSON ;
+- `data` est un objet JSON, envoyé en texte ou en objet ; un contenu qui n'est pas un objet JSON est
+  refusé (400). Il est rendu en texte JSON compact, clés dans l'ordre de `jsonb` ;
 - un identifiant ou un numéro de version mal formé répond 404, comme une enquête inconnue.
 - règle A00196 (US-INVESTIGATIONS-11 du front) : un agent GT (métier de sa business unit,
   ADR-0047) ne peut enregistrer une version sans `fuseauAnalysis` quand 25 sondages fiables ou
@@ -750,9 +774,11 @@ contrat. `/maj-parametrage` n'est pas reprise (ancien front seulement). À conna
   le conteneur, non versionné). Une image est reconnue à ses premiers octets (JPEG, PNG, GIF,
   WebP) ; un SVG ou un autre fichier est refusé. Les fichiers sont servis en téléchargement,
   avec `X-Content-Type-Options: nosniff`, et le nom demandé est réduit à son dernier segment.
-- **Habilitation d'une recherche d'adresse** : l'agent (table `email_services`) est habilité si
-  son agence couvre le département (`service_departments`) ou a un accès général
-  (`services.full_access`).
+- **Habilitation d'une recherche d'adresse** : l'agence de l'agent est sa business unit
+  (`users.business_unit_code`) ; il est habilité si elle couvre le département
+  (`departments.business_unit_codes`) ou a un accès général (`business_units.full_access`, révision
+  `0023`). Les visites ne sont plus stockées et les zones à accès restreint valent `[]` (tables
+  retirées par `0020`) ; ces routes ne servent qu'à l'ancien front.
 - **Rapports** : chemin sur le dépôt `agence/année/numéro` en minuscules ; un numéro qui
   permettrait de sortir du dépôt est refusé (400). Dépôt injoignable ou non configuré : 502
   (Symfony répondait 500).
@@ -822,12 +848,6 @@ démarrage**, avec un message qui nomme la variable en cause.
 | `GED_BASE_URI` | non | adresse de l'API de la GED (fiche des affaires) ; sans elle, `/case-detail` répond 502 |
 | `GED_FILES_BASE_URI` | non | adresse de téléchargement des fichiers de la GED |
 | `GED_USERNAME` · `GED_PASSWORD` | non | compte de la GED (Basic Auth) ; mêmes valeurs que le back Symfony |
-| `DB_AUDIT_HOST` | oui | adresse de la base d'audit MySQL (`mysql` avec docker compose) |
-| `DB_AUDIT_PORT` | non (3306) | port de la base d'audit |
-| `DB_AUDIT_NAME` | oui | nom de la base d'audit (`solscore`) |
-| `DB_AUDIT_USER` | oui | utilisateur de la base d'audit |
-| `DB_AUDIT_PASSWORD` | oui | mot de passe de la base d'audit |
-| `DB_AUDIT_ROOT_PASSWORD` | docker compose | mot de passe root du conteneur MySQL (non lu par l'API) |
 | `LOG_DIR` | non (`logs`) | dossier des journaux quotidiens |
 | `OIDC_ISSUER` | oui | émetteur Azure : `https://login.microsoftonline.com/<ID_TENANT>/v2.0` |
 | `OIDC_AUDIENCE` | oui | ID de l'application Azure |
@@ -852,10 +872,10 @@ Chaque requête métier est tracée deux fois par `core/audit.py`, avec le même
 identifiant de requête (renvoyé au client dans l'en-tête `X-Request-ID`) :
 
 - **dans un fichier texte par jour**, `logs/AAAA-MM-JJ.txt` (`core/logger.py`) ;
-- **dans la table `audit_log`** de la base MySQL `solscore`, consultable avec phpMyAdmin
-  (`http://localhost:8083`).
+- **dans la table `usage_logs`** de la base métier (migration `0024`, mêmes colonnes que
+  l'ancienne table `audit_log` de MySQL, qu'elle remplace depuis le 02/11/2026).
 
-| Question | Colonne de `audit_log` |
+| Question | Colonne de `usage_logs` |
 |---|---|
 | Qui ? | `username` (issu du jeton ; vide si la requête est refusée), `ip_address`, `user_agent` |
 | Quoi ? | `action` (nom de la fonction de route), `method`, `path`, `status_code` |
@@ -865,8 +885,10 @@ identifiant de requête (renvoyé au client dans l'en-tête `X-Request-ID`) :
 Ne sont pas tracés : `/api/health`, la documentation (`/docs`, `/openapi.json`) et les
 requêtes `OPTIONS` du navigateur.
 
-L'écriture en base se fait après l'envoi de la réponse. Si la base d'audit est
-injoignable, la requête aboutit quand même et l'erreur est écrite dans le journal du jour.
+L'écriture en base se fait après l'envoi de la réponse, par le pool de connexions de la base
+métier. Si elle échoue, la requête aboutit quand même et l'erreur est écrite dans le journal
+du jour. `created_at` est enregistrée avec son fuseau (`timestamptz`) ; `details` est un `jsonb`,
+interrogeable directement (`details->'timings_ms'->>'db'`).
 
 `details.timings_ms` répartit la durée par étape, en millisecondes : `auth` (vérification
 du jeton, y compris la récupération des clés Azure, faite une fois par heure), `db`
