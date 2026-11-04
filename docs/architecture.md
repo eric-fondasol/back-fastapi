@@ -806,6 +806,12 @@ collection est renvoyée directement (plus d'enveloppe `data`), sans `color`.
 Parcelle inconnue : `404 {"detail": "Parcelle 84129000AB0123 introuvable"}` ; IGN
 injoignable : `502`.
 
+Paris, Lyon et Marseille : le front envoie le code INSEE de l'arrondissement (celui de l'IDU :
+`75105`, `69382`, `13202`…), mais l'API Carto ne trouve rien avec lui. `sources.api_carto_params`
+envoie alors le code de la commune (`75056`, `69123`, `13055`) et l'arrondissement dans
+`code_arr` (ses trois derniers chiffres : `105`) ; vérifié le 04/11/2026 (0 résultat sans
+`code_arr`, 1 avec).
+
 **Erreurs :**
 
 | Statut | Cause |
