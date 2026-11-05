@@ -124,7 +124,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/domains/profile/test_routes.py` | 22 | la base métier de test |
 | `tests/domains/profile/test_sign_in.py` | 10 | la base métier de test (département Azure, business unit et métier) |
 | `tests/domains/projects/test_entities.py` | 50 | rien |
-| `tests/domains/projects/test_routes.py` | 75 | la base métier de test |
+| `tests/domains/projects/test_routes.py` | 82 | la base métier de test (dont l'historique de géolocalisation écrit à chaque déplacement) |
 | `tests/domains/investigations/test_routes.py` | 34 | la base métier de test |
 | `tests/domains/investigations/test_fuseau_offer.py` | 27 | la base métier de test (comptage de l'entrepôt simulé) |
 | `tests/domains/investigations/test_nearby.py` | 3 | la base métier de test |
@@ -147,6 +147,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/migrations/test_0024_usage_logs.py` | 3 | la base métier de test (reconstruite jusqu'à `0023`, puis `0024` : une requête journalisée, statut négatif refusé, index) |
 | `tests/migrations/test_0027_water_levels_automatic_kind.py` | 2 | la base métier de test (reconstruite jusqu'à `0026`, un relevé automatique, puis `0027` et retour à `0026`) |
 | `tests/migrations/test_0028_v4_surveys_sites_geolocation_history.py` | 5 | la base métier de test (reconstruite jusqu'à `0027`, une affaire, un site, un sondage et une ancienne correction, puis `0028` et retour à `0027`) |
+| `tests/migrations/test_0029_geolocation_history_altitude.py` | 2 | la base métier de test (reconstruite jusqu'à `0028`, puis `0029` et retour à `0028`) |
 
 Les tests qui écrivent n'utilisent jamais la base métier de `DB_REFONTE_NAME`. Ils passent
 par `DB_REFONTE_TEST_NAME` (`fondasol_fastapi_test` par défaut), sur le même serveur. Cette

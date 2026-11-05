@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from app.core.errors import Conflict, NotFound, Unprocessable
+from app.core.profile import Profile
 from app.database.connection import refonte_transaction
 from app.domains.projects import queries, sources
 from app.domains.projects.entities import (
@@ -67,15 +68,15 @@ def project_surveys(project_id: str) -> list[Survey]:
 # Une position remet à zéro le motif de non-géolocalisation et déplace tous les chantiers de
 # l'affaire ; sans position, un motif marque l'affaire non géolocalisable. Position et altitude sont
 # celles des chantiers (schéma v3).
-def relocate_project(project_id: str, change: PositionChange) -> Project:
+def relocate_project(project_id: str, change: PositionChange, author: Profile) -> Project:
     with refonte_transaction() as connection:
         relocated = _relocated(_existing_project(connection, project_id), change)
-        queries.relocate_project_sites(connection, relocated, change.coordinates, change.altitude)
+        queries.relocate_project_sites(connection, relocated, change.coordinates, change.altitude, author.id, author.email)
         queries.update_project(connection, relocated)
         return relocated
 
 
-def relocate_survey(survey_id: str, change: PositionChange) -> Survey:
+def relocate_survey(survey_id: str, change: PositionChange, author: Profile) -> Survey:
     with refonte_transaction() as connection:
         survey = queries.find_survey(connection, survey_id)
 
@@ -83,6 +84,8 @@ def relocate_survey(survey_id: str, change: PositionChange) -> Survey:
             raise NotFound(f"Sondage introuvable : {survey_id}")
 
         relocated = _relocated(survey, change)
+        if change.coordinates is not None or change.altitude is not None:
+            queries.record_survey_position(connection, survey_id, author.id, author.email)
         queries.update_survey(connection, relocated)
         return relocated
 

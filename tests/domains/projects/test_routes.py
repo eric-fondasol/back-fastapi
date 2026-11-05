@@ -5,16 +5,19 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.core.auth import current_user
+from app.core.profile import Profile, current_profile
 from app.domains.projects import queries
 from app.domains.projects.entities import GeolocationFilter, SearchCriteria, classify
 from app.main import app
 
 PARIS = (2.3522, 48.8566)
+AGENT = Profile(id="0d4f5c2e-7a3b-4c1d-9e8f-123456789abc", azure_oid="oid-agent", email="agent@fondasol.fr", display_name="Agent Test")
 
 
 @pytest.fixture
 def client(refonte_database):
     app.dependency_overrides[current_user] = lambda: "test@fondasol.fr"
+    app.dependency_overrides[current_profile] = lambda: AGENT
 
     with TestClient(app) as test_client:
         yield test_client
@@ -411,6 +414,71 @@ def test_an_invalid_relocation_is_refused(client, bastille, path, body, status):
 @pytest.mark.parametrize("path", [f"/projects/{encoded('A-1')}", f"/surveys/{encoded('SV-1')}"])
 def test_a_malformed_json_body_is_refused(client, bastille, path):
     assert client.put(path, content="{pas du json", headers={"Content-Type": "application/json"}).status_code == 400
+
+
+HISTORY = (
+    "SELECT site_id, survey_id, project_id, longitude::float8, latitude::float8, altitude, id_user, user_email "
+    "FROM geolocation_correction_history ORDER BY site_id, survey_id NULLS FIRST"
+)
+
+
+def history(engine):
+    with engine.connect() as connection:
+        return [tuple(row) for row in connection.execute(text(HISTORY)).all()]
+
+
+def test_relocating_a_project_keeps_the_previous_position_and_altitude_of_each_site(client, refonte_database):
+    add_project(refonte_database, "IP.09.0002", altitude=35.0)
+    add_site(refonte_database, "IP.09.0002-B", "IP.09.0002", position=(2.36, 48.86), altitude=None)
+
+    client.put(f"/projects/{encoded('IP.09.0002')}", json={"Latitude": 45.7640, "Longitude": 4.8357, "Altitude": 172.5})
+
+    assert history(refonte_database) == [
+        ("IP.09.0002", None, key("IP.09.0002"), pytest.approx(2.3522), pytest.approx(48.8566), 35.0, AGENT.id, AGENT.email),
+        ("IP.09.0002-B", None, key("IP.09.0002"), pytest.approx(2.36), pytest.approx(48.86), None, AGENT.id, AGENT.email),
+    ]
+
+
+def test_a_project_located_for_the_first_time_records_an_empty_previous_position(client, refonte_database):
+    add_project(refonte_database, "IP.09.0003", position=None)
+
+    client.put(f"/projects/{encoded('IP.09.0003')}", json={"Latitude": 45.7640, "Longitude": 4.8357})
+
+    assert history(refonte_database) == [("IP.09.0003", None, key("IP.09.0003"), None, None, None, AGENT.id, AGENT.email)]
+
+
+def test_marking_a_project_not_geolocatable_moves_no_site_and_records_nothing(client, bastille):
+    client.put(f"/projects/{encoded('A-2026-001')}", json={"NoGeoProjectReasonID": 3})
+
+    assert history(bastille) == []
+
+
+def test_relocating_a_survey_keeps_its_previous_position_and_altitude(client, bastille):
+    with bastille.begin() as connection:
+        connection.execute(text("UPDATE surveys SET altitude = 34.5 WHERE id = 'SV-1'"))
+
+    client.put(f"/surveys/{encoded('SV-1')}", json={"Longitude": 4.8, "Latitude": 45.7, "Altitude": 170.0})
+
+    assert history(bastille) == [("S-1", "SV-1", key("A-2026-001"), pytest.approx(2.3522), pytest.approx(48.8566), 34.5, AGENT.id, AGENT.email)]
+
+
+def test_a_survey_located_for_the_first_time_records_an_empty_previous_position(client, bastille):
+    client.put(f"/surveys/{encoded('SV-2')}", json={"Longitude": 4.8, "Latitude": 45.7})
+
+    assert history(bastille) == [("S-1", "SV-2", key("A-2026-001"), None, None, None, AGENT.id, AGENT.email)]
+
+
+def test_marking_a_survey_not_geolocatable_keeps_its_position_and_records_nothing(client, bastille):
+    client.put(f"/surveys/{encoded('SV-1')}", json={"NoGeoSurveyReasonID": 2})
+
+    assert history(bastille) == []
+    assert scalar(bastille, "SELECT ST_X(geometry) FROM surveys WHERE id = 'SV-1'") == pytest.approx(2.3522)
+
+
+def test_a_refused_relocation_records_nothing(client, bastille):
+    client.put(f"/surveys/{encoded('SV-1')}", json={"Longitude": 400, "Latitude": 45.7})
+
+    assert history(bastille) == []
 
 
 def test_the_ged_presence_is_declared_by_hand_and_traced(client, bastille):

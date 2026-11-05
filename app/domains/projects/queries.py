@@ -261,9 +261,35 @@ def update_ged_presence(connection: Connection, project: Project, previous: bool
     )
 
 
+# Historique de géolocalisation (schéma v4) : la position et l'altitude d'un site ou d'un sondage juste
+# avant sa modification, vides s'il n'en avait pas, avec l'agent qui le déplace. À appeler dans la même
+# transaction, avant l'écriture de la nouvelle position.
+def record_site_positions(connection: Connection, project_key: str, author_id: str, author_email: str) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO geolocation_correction_history (site_id, project_id, longitude, latitude, altitude, id_user, user_email) "
+            "SELECT id, project_id, ST_X(geometry), ST_Y(geometry), altitude, :author_id, :author_email FROM sites WHERE project_id = :key"
+        ),
+        {"key": project_key, "author_id": author_id, "author_email": author_email},
+    )
+
+
+def record_survey_position(connection: Connection, survey_id: str, author_id: str, author_email: str) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO geolocation_correction_history (site_id, survey_id, project_id, longitude, latitude, altitude, id_user, user_email) "
+            "SELECT sv.site_id, sv.id, s.project_id, ST_X(sv.geometry), ST_Y(sv.geometry), sv.altitude, :author_id, :author_email "
+            "FROM surveys sv JOIN sites s ON s.id = sv.site_id WHERE sv.id = :id"
+        ),
+        {"id": survey_id, "author_id": author_id, "author_email": author_email},
+    )
+
+
 # Repositionner une affaire place tous ses chantiers au même endroit, marqués fiables. Une affaire sans
 # chantier en reçoit un, sous son n° (comme la plupart des chantiers) : sans lui, sa position serait perdue.
-def relocate_project_sites(connection: Connection, project: Project, coordinates: Coordinates | None, altitude: float | None) -> None:
+def relocate_project_sites(
+    connection: Connection, project: Project, coordinates: Coordinates | None, altitude: float | None, author_id: str, author_email: str
+) -> None:
     if coordinates is not None:
         connection.execute(
             text(
@@ -272,6 +298,11 @@ def relocate_project_sites(connection: Connection, project: Project, coordinates
             ),
             {"number": project.id, "key": project.key},
         )
+
+    if coordinates is not None or altitude is not None:
+        record_site_positions(connection, project.key, author_id, author_email)
+
+    if coordinates is not None:
         connection.execute(
             text(
                 "UPDATE sites SET geometry = ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326), longitude = :longitude, "

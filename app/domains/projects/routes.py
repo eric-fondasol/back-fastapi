@@ -11,6 +11,7 @@ from app.core.auth import current_user
 from app.core.body import json_object
 from app.core.errors import InvalidRequest
 from app.core.logger import logger
+from app.core.profile import Profile, current_profile
 from app.domains.projects import schemas, services
 from app.domains.projects.entities import search_criteria
 from app.domains.projects.sources import GedResponse, GedUnavailable
@@ -62,15 +63,19 @@ def project(project_id: str) -> dict[str, Any]:
 
 # L'identifiant est encodé en base64 dans l'URL ; le base64 peut lui-même contenir « / ».
 @router.put("/projects/{encoded_id:path}")
-def relocate_project(encoded_id: str, payload: dict[str, Any] = Depends(json_object)) -> dict[str, Any]:
+def relocate_project(
+    encoded_id: str, payload: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)
+) -> dict[str, Any]:
     project_id = schemas.decoded_id(encoded_id)
-    return schemas.project_json(services.relocate_project(project_id, schemas.position_change(payload, "NoGeoProjectReasonID")))
+    return schemas.project_json(services.relocate_project(project_id, schemas.position_change(payload, "NoGeoProjectReasonID"), profile))
 
 
 @router.put("/surveys/{encoded_id:path}")
-def relocate_survey(encoded_id: str, payload: dict[str, Any] = Depends(json_object)) -> dict[str, Any]:
+def relocate_survey(
+    encoded_id: str, payload: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)
+) -> dict[str, Any]:
     survey_id = schemas.decoded_id(encoded_id)
-    return schemas.survey_json(services.relocate_survey(survey_id, schemas.position_change(payload, "NoGeoSurveyReasonID")))
+    return schemas.survey_json(services.relocate_survey(survey_id, schemas.position_change(payload, "NoGeoSurveyReasonID"), profile))
 
 
 @router.get("/codes-metier")
