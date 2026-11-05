@@ -223,17 +223,163 @@ def _optional(value: Any, name: str) -> str | None:
     return value
 
 
+# Favoris de recherche (migration 0030) : chacun désigné par sa clé naturelle, 20 au plus par type.
+FAVORITE_SEARCH_LIMIT = 20
+QUOTE_NUMBER = re.compile(r"[A-Z0-9][A-Z0-9.-]{0,39}")
+COORDINATE_DECIMALS = 5
+PARCEL_COUNTRIES = ["fr", "ca"]
+INSEE_CODE = re.compile(r"\d{5}|2[AB]\d{3}")
+FRENCH_PARCEL_REFERENCE = re.compile(r"(?:\d{5}|2[AB]\d{3})[0-9A-Z]{3}[0-9A-Z]{2}\d{4}")
+QUEBEC_LOT_REFERENCE = re.compile(r"\d{1,20}")
+
+
+# Comme le front (quoteNumberOf) : sans espaces autour, en majuscules.
+def quote_number(value: Any) -> str:
+    number = value.strip().upper() if isinstance(value, str) else ""
+
+    if not QUOTE_NUMBER.fullmatch(number):
+        raise InvalidRequest("Numero de devis invalide : lettres, chiffres, points et tirets, 40 caracteres au plus.")
+
+    return number
+
+
+@dataclass(frozen=True)
+class FavoriteQuote:
+    number: str
+    description: str
+    created_at: datetime
+
+    @classmethod
+    def of(cls, raw: dict[str, Any], created_at: datetime) -> "FavoriteQuote":
+        return cls(quote_number(raw.get("number")), _optional(raw.get("description"), "description") or "", created_at)
+
+    def to_json(self) -> dict[str, Any]:
+        return {"number": self.number, "description": self.description, "createdAt": self.created_at.isoformat(timespec="seconds")}
+
+
+# Une position, arrondie au 5e décimal : deux saisies à moins d'un mètre l'une de l'autre sont le même favori.
+@dataclass(frozen=True)
+class FavoriteCoordinates:
+    latitude: float
+    longitude: float
+    created_at: datetime
+
+    @classmethod
+    def of(cls, raw: dict[str, Any], created_at: datetime) -> "FavoriteCoordinates":
+        latitude, longitude = coordinates(raw.get("latitude"), raw.get("longitude"))
+        return cls(latitude, longitude, created_at)
+
+    def to_json(self) -> dict[str, Any]:
+        return {"latitude": self.latitude, "longitude": self.longitude, "createdAt": self.created_at.isoformat(timespec="seconds")}
+
+
+def coordinates(latitude: Any, longitude: Any) -> tuple[float, float]:
+    if not is_number(latitude) or not is_number(longitude) or not math.isfinite(latitude) or not math.isfinite(longitude):
+        raise InvalidRequest("latitude et longitude sont requises.")
+
+    if not -90 <= latitude <= 90:
+        raise InvalidRequest(f"Latitude hors bornes : {latitude:f}")
+
+    if not -180 <= longitude <= 180:
+        raise InvalidRequest(f"Longitude hors bornes : {longitude:f}")
+
+    return round(float(latitude), COORDINATE_DECIMALS), round(float(longitude), COORDINATE_DECIMALS)
+
+
+# Clé d'une position dans l'URL : « latitude,longitude » en degrés décimaux.
+def coordinates_key(value: str) -> tuple[float, float]:
+    parts = value.split(",")
+
+    try:
+        latitude, longitude = (float(part) for part in parts) if len(parts) == 2 else (math.nan, math.nan)
+    except ValueError:
+        latitude, longitude = math.nan, math.nan
+
+    return coordinates(latitude, longitude)
+
+
+# Une parcelle française (référence = IDU, avec code INSEE, commune, section et numéro) ou un lot du
+# Québec (référence = n° sans espaces, number = n° tel qu'affiché).
+@dataclass(frozen=True)
+class FavoriteParcel:
+    country: str
+    reference: str
+    municipality_code: str | None
+    municipality_name: str | None
+    section: str | None
+    number: str
+    created_at: datetime
+
+    @classmethod
+    def of(cls, raw: dict[str, Any], created_at: datetime) -> "FavoriteParcel":
+        country = parcel_country(raw.get("country"))
+        reference = parcel_reference(country, raw.get("reference"))
+        number = _required(raw.get("number"), "number")
+
+        if country == "ca":
+            return cls(country, reference, None, None, None, number, created_at)
+
+        municipality_code = _required(raw.get("municipalityCode"), "municipalityCode")
+
+        if not INSEE_CODE.fullmatch(municipality_code) or not reference.startswith(municipality_code):
+            raise InvalidRequest("municipalityCode doit etre le code INSEE par lequel commence la reference.")
+
+        return cls(
+            country,
+            reference,
+            municipality_code,
+            _required(raw.get("municipalityName"), "municipalityName"),
+            _required(raw.get("section"), "section"),
+            number,
+            created_at,
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "country": self.country,
+            "reference": self.reference,
+            "municipalityCode": self.municipality_code,
+            "municipalityName": self.municipality_name,
+            "section": self.section,
+            "number": self.number,
+            "createdAt": self.created_at.isoformat(timespec="seconds"),
+        }
+
+
+def parcel_country(value: Any) -> str:
+    if value not in PARCEL_COUNTRIES:
+        raise InvalidRequest(f"country doit valoir {', '.join(PARCEL_COUNTRIES)}.")
+
+    return value
+
+
+def parcel_reference(country: str, value: Any) -> str:
+    pattern = FRENCH_PARCEL_REFERENCE if country == "fr" else QUEBEC_LOT_REFERENCE
+
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        expected = "un IDU de 14 caracteres" if country == "fr" else "un numero de lot sans espaces"
+        raise InvalidRequest(f"reference doit etre {expected}.")
+
+    return value
+
+
 @dataclass(frozen=True)
 class Favorites:
     project_ids: list[str]
     layer_ids: list[str]
     addresses: list[FavoriteAddress]
+    quotes: list[FavoriteQuote] = field(default_factory=list)
+    coordinates: list[FavoriteCoordinates] = field(default_factory=list)
+    parcels: list[FavoriteParcel] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return {
             "projects": self.project_ids,
             "layers": self.layer_ids,
             "addresses": [address.to_json() for address in self.addresses],
+            "quotes": [quote.to_json() for quote in self.quotes],
+            "coordinates": [position.to_json() for position in self.coordinates],
+            "parcels": [parcel.to_json() for parcel in self.parcels],
         }
 
 
