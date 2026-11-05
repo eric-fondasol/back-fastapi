@@ -146,6 +146,7 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | `tests/migrations/test_0023_business_units_full_access.py` | 1 | la base métier de test (reconstruite jusqu'à `0022`, deux business units, puis `0023`) |
 | `tests/migrations/test_0024_usage_logs.py` | 3 | la base métier de test (reconstruite jusqu'à `0023`, puis `0024` : une requête journalisée, statut négatif refusé, index) |
 | `tests/migrations/test_0027_water_levels_automatic_kind.py` | 2 | la base métier de test (reconstruite jusqu'à `0026`, un relevé automatique, puis `0027` et retour à `0026`) |
+| `tests/migrations/test_0028_v4_surveys_sites_geolocation_history.py` | 5 | la base métier de test (reconstruite jusqu'à `0027`, une affaire, un site, un sondage et une ancienne correction, puis `0028` et retour à `0027`) |
 
 Les tests qui écrivent n'utilisent jamais la base métier de `DB_REFONTE_NAME`. Ils passent
 par `DB_REFONTE_TEST_NAME` (`fondasol_fastapi_test` par défaut), sur le même serveur. Cette
