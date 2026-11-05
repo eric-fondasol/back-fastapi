@@ -9,7 +9,7 @@ from app.main import app
 
 SPIKE = Identity("spike@fondasol.fr", "6f1c2a3e-0b1d-4c55-9a77-1f2e3d4c5b6a", "Spike Test")
 OTHER = Identity("autre@fondasol.fr", "7a2d3b4f-1c2e-4d66-8b88-2a3f4e5d6c7b", "Autre Test")
-EMPTY_FAVORITES = {"projects": [], "layers": [], "addresses": []}
+EMPTY_FAVORITES = {"projects": [], "layers": [], "addresses": [], "quotes": [], "coordinates": [], "parcels": []}
 
 
 @pytest.fixture
@@ -240,3 +240,100 @@ def test_a_request_without_token_is_refused(client):
     app.dependency_overrides.clear()
 
     assert client.get("/me/favorites").status_code == 401
+
+
+FRENCH_PARCEL = {
+    "country": "fr",
+    "reference": "84129000AB0004",
+    "municipalityCode": "84129",
+    "municipalityName": "Sorgues",
+    "section": "AB",
+    "number": "0004",
+}
+QUEBEC_LOT = {"country": "ca", "reference": "4019828", "number": "4 019 828"}
+
+
+def test_a_quote_is_added_once_then_removed_by_its_number(client):
+    created = call(client, "POST", "/me/favorites/quotes", {"number": " sq.31gt.26.10.025 ", "description": "Etude hydrogeologique"})
+    again = call(client, "POST", "/me/favorites/quotes", {"number": "SQ.31GT.26.10.025", "description": "Autre"})
+
+    assert (created.status_code, again.status_code) == (201, 200)
+    assert again.json()["description"] == "Etude hydrogeologique"
+    quotes = call(client, "GET", "/me/favorites").json()["quotes"]
+    assert [(quote["number"], quote["description"]) for quote in quotes] == [("SQ.31GT.26.10.025", "Etude hydrogeologique")]
+
+    assert call(client, "DELETE", "/me/favorites/quotes/SQ.31GT.26.10.025").status_code == 204
+    assert call(client, "DELETE", "/me/favorites/quotes/SQ.31GT.26.10.025").status_code == 204
+    assert call(client, "GET", "/me/favorites").json()["quotes"] == []
+
+
+def test_an_invalid_quote_number_is_refused(client):
+    response = call(client, "POST", "/me/favorites/quotes", {"number": "SQ 1/2"})
+
+    assert response.status_code == 400
+    assert call(client, "GET", "/me/favorites").json()["quotes"] == []
+
+
+def test_coordinates_are_rounded_to_the_fifth_decimal_and_removed_by_their_key(client):
+    created = call(client, "POST", "/me/favorites/coordinates", {"latitude": 48.856612, "longitude": 2.352219})
+    again = call(client, "POST", "/me/favorites/coordinates", {"latitude": 48.856614, "longitude": 2.352221})
+
+    assert (created.status_code, again.status_code) == (201, 200)
+    positions = call(client, "GET", "/me/favorites").json()["coordinates"]
+    assert [(position["latitude"], position["longitude"]) for position in positions] == [(48.85661, 2.35222)]
+
+    assert call(client, "DELETE", "/me/favorites/coordinates/48.85661,2.35222").status_code == 204
+    assert call(client, "GET", "/me/favorites").json()["coordinates"] == []
+
+
+@pytest.mark.parametrize("key", ["48.8", "abc,2", "91,2"])
+def test_an_invalid_coordinates_key_is_refused(client, key):
+    assert call(client, "DELETE", f"/me/favorites/coordinates/{key}").status_code == 400
+
+
+def test_a_french_parcel_and_a_quebec_lot_are_kept_with_what_the_search_needs(client):
+    assert call(client, "POST", "/me/favorites/parcels", FRENCH_PARCEL).status_code == 201
+    assert call(client, "POST", "/me/favorites/parcels", QUEBEC_LOT).status_code == 201
+    assert call(client, "POST", "/me/favorites/parcels", FRENCH_PARCEL).status_code == 200
+
+    parcels = call(client, "GET", "/me/favorites").json()["parcels"]
+    assert sorted((parcel["country"], parcel["reference"], parcel["municipalityCode"], parcel["number"]) for parcel in parcels) == [
+        ("ca", "4019828", None, "4 019 828"),
+        ("fr", "84129000AB0004", "84129", "0004"),
+    ]
+
+    assert call(client, "DELETE", "/me/favorites/parcels/ca/4019828").status_code == 204
+    assert [parcel["country"] for parcel in call(client, "GET", "/me/favorites").json()["parcels"]] == ["fr"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"country": "lu"}, {"reference": "84129AB4"}, {"municipalityCode": "75056"}, {"municipalityName": None}, {"section": ""}],
+)
+def test_an_invalid_parcel_is_refused(client, changes):
+    response = call(client, "POST", "/me/favorites/parcels", {**FRENCH_PARCEL, **changes})
+
+    assert response.status_code == 400
+    assert call(client, "GET", "/me/favorites").json()["parcels"] == []
+
+
+def test_the_twenty_first_favorite_of_a_kind_is_refused(client):
+    for index in range(20):
+        call(client, "POST", "/me/favorites/quotes", {"number": f"SQ.{index}"})
+
+    response = call(client, "POST", "/me/favorites/quotes", {"number": "SQ.20"})
+
+    assert response.status_code == 422
+    assert len(call(client, "GET", "/me/favorites").json()["quotes"]) == 20
+    assert call(client, "POST", "/me/favorites/coordinates", {"latitude": 1, "longitude": 2}).status_code == 201
+
+
+def test_a_user_neither_sees_nor_removes_the_search_favorites_of_another(client):
+    call(client, "POST", "/me/favorites/quotes", {"number": "SQ.1"})
+    call(client, "POST", "/me/favorites/parcels", QUEBEC_LOT)
+
+    assert call(client, "DELETE", "/me/favorites/quotes/SQ.1", identity=OTHER).status_code == 204
+    assert call(client, "GET", "/me/favorites", identity=OTHER).json() == EMPTY_FAVORITES
+    favorites = call(client, "GET", "/me/favorites").json()
+    assert ([quote["number"] for quote in favorites["quotes"]], len(favorites["parcels"])) == (["SQ.1"], 1)
+

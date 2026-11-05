@@ -1,4 +1,4 @@
-# Le métier du profil : préférences, favoris (affaires, couches, adresses) et reprise unique des
+# Le métier du profil : préférences, favoris (affaires, couches, adresses, devis, coordonnées, parcelles) et reprise unique des
 # favoris que le front gardait dans le navigateur. Repris des handlers du back Symfony.
 # Chaque fonction ouvre une transaction : tout ce qu'elle écrit est validé ensemble, ou rien.
 
@@ -11,16 +11,24 @@ from app.database.connection import refonte_transaction
 from app.domains.profile import queries
 from app.domains.profile.entities import (
     FAVORITE_ADDRESS_LIMIT,
+    FAVORITE_SEARCH_LIMIT,
     USER_LAYER_LIMIT,
     USER_LAYER_PREFIX,
     FavoriteAddress,
+    FavoriteCoordinates,
+    FavoriteParcel,
+    FavoriteQuote,
     Favorites,
     Preferences,
     UserLayer,
+    coordinates_key,
     department,
     layer_id,
     layer_name,
     layer_style,
+    parcel_country,
+    parcel_reference,
+    quote_number,
 )
 
 
@@ -98,6 +106,75 @@ def remove_favorite_address(user_id: str, address_id: str) -> None:
 
     if not removed:
         raise NotFound(f"Adresse favorite introuvable : {address_id}")
+
+
+# Favoris de recherche : ajouter renvoie le favori et True s'il vient d'être créé, ou celui déjà enregistré
+# et False ; 422 au-delà de 20 par type (le front retire le plus ancien avant d'ajouter). Retirer un favori
+# absent ne fait rien (idempotent, comme pour les affaires).
+def add_favorite_quote(user_id: str, raw: dict[str, Any]) -> tuple[FavoriteQuote, bool]:
+    quote = FavoriteQuote.of(raw, _now())
+
+    with refonte_transaction() as connection:
+        existing = queries.favorite_quote(connection, user_id, quote.number)
+        if existing is not None:
+            return existing, False
+
+        _check_room(connection, "user_favorite_quotes", user_id, "devis favoris")
+        queries.add_favorite_quote(connection, user_id, quote)
+        return quote, True
+
+
+def remove_favorite_quote(user_id: str, raw_number: str) -> None:
+    number = quote_number(raw_number)
+
+    with refonte_transaction() as connection:
+        queries.remove_favorite_quote(connection, user_id, number)
+
+
+def add_favorite_coordinates(user_id: str, raw: dict[str, Any]) -> tuple[FavoriteCoordinates, bool]:
+    position = FavoriteCoordinates.of(raw, _now())
+
+    with refonte_transaction() as connection:
+        existing = queries.favorite_position(connection, user_id, position.latitude, position.longitude)
+        if existing is not None:
+            return existing, False
+
+        _check_room(connection, "user_favorite_coordinates", user_id, "coordonnees favorites")
+        queries.add_favorite_coordinates(connection, user_id, position)
+        return position, True
+
+
+def remove_favorite_coordinates(user_id: str, key: str) -> None:
+    latitude, longitude = coordinates_key(key)
+
+    with refonte_transaction() as connection:
+        queries.remove_favorite_coordinates(connection, user_id, latitude, longitude)
+
+
+def add_favorite_parcel(user_id: str, raw: dict[str, Any]) -> tuple[FavoriteParcel, bool]:
+    parcel = FavoriteParcel.of(raw, _now())
+
+    with refonte_transaction() as connection:
+        existing = queries.favorite_parcel(connection, user_id, parcel.country, parcel.reference)
+        if existing is not None:
+            return existing, False
+
+        _check_room(connection, "user_favorite_parcels", user_id, "parcelles favorites")
+        queries.add_favorite_parcel(connection, user_id, parcel)
+        return parcel, True
+
+
+def remove_favorite_parcel(user_id: str, raw_country: str, raw_reference: str) -> None:
+    country = parcel_country(raw_country)
+    reference = parcel_reference(country, raw_reference)
+
+    with refonte_transaction() as connection:
+        queries.remove_favorite_parcel(connection, user_id, country, reference)
+
+
+def _check_room(connection, table: str, user_id: str, kind: str) -> None:
+    if queries.favorite_count(connection, table, user_id) >= FAVORITE_SEARCH_LIMIT:
+        raise Unprocessable(f"{FAVORITE_SEARCH_LIMIT} {kind} au plus.")
 
 
 # Reprise unique du localStorage du front : fusionne sans doublon ni écrasement.
@@ -204,6 +281,9 @@ def _favorites(connection, user_id: str) -> Favorites:
         queries.favorite_project_ids(connection, user_id),
         queries.favorite_layer_ids(connection, user_id),
         queries.favorite_addresses(connection, user_id),
+        queries.favorite_quotes(connection, user_id),
+        queries.favorite_coordinates(connection, user_id),
+        queries.favorite_parcels(connection, user_id),
     )
 
 

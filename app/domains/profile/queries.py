@@ -8,7 +8,15 @@ from typing import Any
 
 from sqlalchemy import Connection, text
 
-from app.domains.profile.entities import FavoriteAddress, MapLayerSetting, Preferences, UserLayer
+from app.domains.profile.entities import (
+    FavoriteAddress,
+    FavoriteCoordinates,
+    FavoriteParcel,
+    FavoriteQuote,
+    MapLayerSetting,
+    Preferences,
+    UserLayer,
+)
 
 ADDRESS_COLUMNS = (
     "id, external_id, label, name, context, kind, ST_X(geometry) AS longitude, ST_Y(geometry) AS latitude, created_at"
@@ -202,6 +210,148 @@ def _address(row: Any) -> FavoriteAddress:
         float(row["latitude"]),
         # Rendu en UTC, quel que soit le fuseau de la session PostgreSQL.
         row["created_at"].astimezone(UTC),
+    )
+
+
+# Favoris de recherche (migration 0030) : le plus récent en tête, comme les adresses.
+# Ajouter un favori déjà présent ne change rien (ON CONFLICT DO NOTHING) : sa date reste celle du premier ajout.
+SEARCH_FAVORITE_TABLES = ("user_favorite_quotes", "user_favorite_coordinates", "user_favorite_parcels")
+
+
+def favorite_count(connection: Connection, table: str, user_id: str) -> int:
+    if table not in SEARCH_FAVORITE_TABLES:
+        raise ValueError(table)
+
+    return connection.execute(text(f"SELECT count(*) FROM {table} WHERE user_id = :user_id"), {"user_id": user_id}).scalar_one()
+
+
+def favorite_quotes(connection: Connection, user_id: str) -> list[FavoriteQuote]:
+    rows = connection.execute(
+        text(
+            "SELECT quote_number, description, created_at FROM user_favorite_quotes "
+            "WHERE user_id = :user_id ORDER BY created_at DESC, quote_number"
+        ),
+        {"user_id": user_id},
+    ).mappings()
+    return [FavoriteQuote(row["quote_number"], row["description"], row["created_at"].astimezone(UTC)) for row in rows]
+
+
+def favorite_quote(connection: Connection, user_id: str, number: str) -> FavoriteQuote | None:
+    return next((quote for quote in favorite_quotes(connection, user_id) if quote.number == number), None)
+
+
+def add_favorite_quote(connection: Connection, user_id: str, quote: FavoriteQuote) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO user_favorite_quotes (user_id, quote_number, description, created_at) "
+            "VALUES (:user_id, :number, :description, :at) ON CONFLICT DO NOTHING"
+        ),
+        {"user_id": user_id, "number": quote.number, "description": quote.description, "at": quote.created_at},
+    )
+
+
+def remove_favorite_quote(connection: Connection, user_id: str, number: str) -> None:
+    connection.execute(
+        text("DELETE FROM user_favorite_quotes WHERE user_id = :user_id AND quote_number = :number"),
+        {"user_id": user_id, "number": number},
+    )
+
+
+def favorite_coordinates(connection: Connection, user_id: str) -> list[FavoriteCoordinates]:
+    rows = connection.execute(
+        text(
+            "SELECT latitude, longitude, created_at FROM user_favorite_coordinates "
+            "WHERE user_id = :user_id ORDER BY created_at DESC, latitude, longitude"
+        ),
+        {"user_id": user_id},
+    ).mappings()
+    return [FavoriteCoordinates(float(row["latitude"]), float(row["longitude"]), row["created_at"].astimezone(UTC)) for row in rows]
+
+
+def favorite_position(connection: Connection, user_id: str, latitude: float, longitude: float) -> FavoriteCoordinates | None:
+    return next(
+        (
+            position
+            for position in favorite_coordinates(connection, user_id)
+            if (position.latitude, position.longitude) == (latitude, longitude)
+        ),
+        None,
+    )
+
+
+def add_favorite_coordinates(connection: Connection, user_id: str, position: FavoriteCoordinates) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO user_favorite_coordinates (user_id, latitude, longitude, created_at) "
+            "VALUES (:user_id, :latitude, :longitude, :at) ON CONFLICT DO NOTHING"
+        ),
+        {"user_id": user_id, "latitude": position.latitude, "longitude": position.longitude, "at": position.created_at},
+    )
+
+
+def remove_favorite_coordinates(connection: Connection, user_id: str, latitude: float, longitude: float) -> None:
+    connection.execute(
+        text("DELETE FROM user_favorite_coordinates WHERE user_id = :user_id AND latitude = :latitude AND longitude = :longitude"),
+        {"user_id": user_id, "latitude": latitude, "longitude": longitude},
+    )
+
+
+PARCEL_COLUMNS = "country, reference, municipality_code, municipality_name, section, number, created_at"
+
+
+def favorite_parcels(connection: Connection, user_id: str) -> list[FavoriteParcel]:
+    rows = connection.execute(
+        text(
+            f"SELECT {PARCEL_COLUMNS} FROM user_favorite_parcels "
+            "WHERE user_id = :user_id ORDER BY created_at DESC, country, reference"
+        ),
+        {"user_id": user_id},
+    ).mappings()
+    return [
+        FavoriteParcel(
+            row["country"],
+            row["reference"],
+            row["municipality_code"],
+            row["municipality_name"],
+            row["section"],
+            row["number"],
+            row["created_at"].astimezone(UTC),
+        )
+        for row in rows
+    ]
+
+
+def favorite_parcel(connection: Connection, user_id: str, country: str, reference: str) -> FavoriteParcel | None:
+    return next(
+        (parcel for parcel in favorite_parcels(connection, user_id) if (parcel.country, parcel.reference) == (country, reference)),
+        None,
+    )
+
+
+def add_favorite_parcel(connection: Connection, user_id: str, parcel: FavoriteParcel) -> None:
+    connection.execute(
+        text(
+            f"INSERT INTO user_favorite_parcels ({PARCEL_COLUMNS}, user_id) "
+            "VALUES (:country, :reference, :municipality_code, :municipality_name, :section, :number, :at, :user_id) "
+            "ON CONFLICT DO NOTHING"
+        ),
+        {
+            "user_id": user_id,
+            "country": parcel.country,
+            "reference": parcel.reference,
+            "municipality_code": parcel.municipality_code,
+            "municipality_name": parcel.municipality_name,
+            "section": parcel.section,
+            "number": parcel.number,
+            "at": parcel.created_at,
+        },
+    )
+
+
+def remove_favorite_parcel(connection: Connection, user_id: str, country: str, reference: str) -> None:
+    connection.execute(
+        text("DELETE FROM user_favorite_parcels WHERE user_id = :user_id AND country = :country AND reference = :reference"),
+        {"user_id": user_id, "country": country, "reference": reference},
     )
 
 

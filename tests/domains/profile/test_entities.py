@@ -3,7 +3,15 @@ from datetime import UTC, datetime
 import pytest
 
 from app.core.errors import InvalidRequest
-from app.domains.profile.entities import FavoriteAddress, MapLayerSetting, Preferences
+from app.domains.profile.entities import (
+    FavoriteAddress,
+    FavoriteCoordinates,
+    FavoriteParcel,
+    FavoriteQuote,
+    MapLayerSetting,
+    Preferences,
+    coordinates_key,
+)
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
@@ -103,3 +111,33 @@ def test_a_favorite_address_is_rendered_in_the_api_format():
         "latitude": 48.5,
         "createdAt": "2026-10-14T12:00:00+00:00",
     }
+
+
+def test_a_favorite_quote_number_is_written_like_the_front_searches_it():
+    assert FavoriteQuote.of({"number": " sq.1-a "}, NOW).number == "SQ.1-A"
+    assert FavoriteQuote.of({"number": "SQ.1"}, NOW).description == ""
+
+
+def test_favorite_coordinates_are_rounded_and_bounded():
+    assert FavoriteCoordinates.of({"latitude": 48.856617, "longitude": -2.000004}, NOW).to_json()["latitude"] == 48.85662
+    assert coordinates_key("48.85662,-2") == (48.85662, -2.0)
+
+    for raw in [{"latitude": 90.1, "longitude": 0}, {"latitude": True, "longitude": 0}, {"latitude": float("nan"), "longitude": 0}]:
+        with pytest.raises(InvalidRequest):
+            FavoriteCoordinates.of(raw, NOW)
+
+
+def test_a_corsican_parcel_has_an_insee_code_with_letters():
+    parcel = FavoriteParcel.of(
+        {"country": "fr", "reference": "2A004000AB0001", "municipalityCode": "2A004", "municipalityName": "Ajaccio", "section": "AB", "number": "0001"},
+        NOW,
+    )
+
+    assert parcel.municipality_code == "2A004"
+
+
+def test_a_quebec_lot_keeps_only_its_reference_and_number():
+    lot = FavoriteParcel.of({"country": "ca", "reference": "4019828", "number": "4 019 828", "municipalityName": "ignoré"}, NOW)
+
+    assert (lot.municipality_code, lot.municipality_name, lot.section) == (None, None, None)
+

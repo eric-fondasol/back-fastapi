@@ -100,6 +100,47 @@ def remove_favorite_address(address_id: str, profile: Profile = Depends(current_
     return Response(status_code=NO_CONTENT)
 
 
+# Favoris de recherche : 201 si le favori est ajouté, 200 s'il l'était déjà ; 422 au-delà de 20 par type.
+# DELETE est idempotent (204 même si le favori était absent) ; le favori est désigné par sa clé naturelle.
+@router.post("/favorites/quotes")
+def add_favorite_quote(raw: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)) -> JSONResponse:
+    quote, created = services.add_favorite_quote(profile.id, raw)
+    return JSONResponse(quote.to_json(), status_code=201 if created else 200)
+
+
+@router.delete("/favorites/quotes/{number}", status_code=NO_CONTENT)
+def remove_favorite_quote(number: str, profile: Profile = Depends(current_profile)) -> Response:
+    services.remove_favorite_quote(profile.id, number)
+    return Response(status_code=NO_CONTENT)
+
+
+@router.post("/favorites/coordinates")
+def add_favorite_coordinates(
+    raw: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)
+) -> JSONResponse:
+    position, created = services.add_favorite_coordinates(profile.id, raw)
+    return JSONResponse(position.to_json(), status_code=201 if created else 200)
+
+
+# « latitude,longitude » en degrés décimaux, arrondis au 5e décimal comme à l'ajout.
+@router.delete("/favorites/coordinates/{position}", status_code=NO_CONTENT)
+def remove_favorite_coordinates(position: str, profile: Profile = Depends(current_profile)) -> Response:
+    services.remove_favorite_coordinates(profile.id, position)
+    return Response(status_code=NO_CONTENT)
+
+
+@router.post("/favorites/parcels")
+def add_favorite_parcel(raw: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)) -> JSONResponse:
+    parcel, created = services.add_favorite_parcel(profile.id, raw)
+    return JSONResponse(parcel.to_json(), status_code=201 if created else 200)
+
+
+@router.delete("/favorites/parcels/{country}/{reference}", status_code=NO_CONTENT)
+def remove_favorite_parcel(country: str, reference: str, profile: Profile = Depends(current_profile)) -> Response:
+    services.remove_favorite_parcel(profile.id, country, reference)
+    return Response(status_code=NO_CONTENT)
+
+
 # Reprise unique des favoris gardés dans le navigateur ; renvoie l'état après fusion.
 @router.post("/favorites/import")
 def import_favorites(
