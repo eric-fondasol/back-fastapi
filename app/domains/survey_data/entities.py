@@ -132,11 +132,11 @@ def _structure_from_json(raw: Any, index: int) -> StructureLevels:
         structure=structure.strip(),
         standard_id=standard_id,
         referentiel=referentiel or None,
-        levels={level_id: _level_from_json(levels.get(level_id), f"structures[{index}].levels.{level_id}") for level_id in LEVEL_IDS},
+        levels={level_id: level_from_json(levels.get(level_id), f"structures[{index}].levels.{level_id}") for level_id in LEVEL_IDS},
     )
 
 
-def _level_from_json(raw: Any, path: str) -> Level:
+def level_from_json(raw: Any, path: str) -> Level:
     if raw is None:
         return Level()
     if not isinstance(raw, dict) or not set(raw) <= set(LEVEL_COLUMNS):

@@ -1,6 +1,7 @@
 # Routes de l'édition des données d'un site et de ses sondages (US-CARTE-40 à 46 du front).
 # Protégées par le jeton (branchées avec dependencies=protected dans main.py).
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -40,3 +41,19 @@ def replace_site_reference_levels(
     site_id: str, payload: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)
 ) -> dict[str, Any]:
     return services.replace_site_reference_levels(site_id, payload, profile).to_json()
+
+
+# Données saisies d'un sondage : lithologie, pressiomètre, pénétromètre, suivi de nappe, niveaux
+# caractéristiques, hydrodynamique, et la cote du terrain naturel (altitude du sondage). 404 sondage inconnu.
+# Préfixe /survey-data : PUT /surveys/{id base64} (position) capturerait « /surveys/{id}/data ».
+@router.get("/survey-data/{survey_id:path}")
+def survey_data(survey_id: str) -> dict[str, Any]:
+    return services.survey_data(survey_id).to_json()
+
+
+# Remplace toutes les sections du sondage. 400 corps mal formé, 404 sondage inconnu, 422 règle métier.
+@router.put("/survey-data/{survey_id:path}")
+def replace_survey_data(
+    survey_id: str, payload: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)
+) -> dict[str, Any]:
+    return services.replace_survey_data(survey_id, payload, profile, date.today()).to_json()
