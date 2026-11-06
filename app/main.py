@@ -19,6 +19,7 @@ from app.domains.projects.routes import router as projects_router
 from app.domains.quotes.routes import router as quotes_router
 from app.domains.reports.routes import router as reports_router
 from app.domains.socle.routes import router as socle_router
+from app.domains.survey_data.routes import router as survey_data_router
 from app.domains.survey_imports.routes import router as survey_imports_router
 from app.domains.layer_catalog.routes import router as layer_catalog_router
 
@@ -58,6 +59,7 @@ app.include_router(profile_router, dependencies=protected)
 app.include_router(projects_router, dependencies=protected)
 app.include_router(quotes_router, dependencies=protected)
 app.include_router(survey_imports_router, dependencies=protected)
+app.include_router(survey_data_router, dependencies=protected)
 app.include_router(layer_catalog_router, dependencies=protected)
 app.include_router(investigations_router, dependencies=protected)
 app.include_router(socle_router, dependencies=protected)

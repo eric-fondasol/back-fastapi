@@ -38,6 +38,12 @@ def project_surveys(project_id: str) -> list[dict[str, Any]]:
     return [schemas.survey_json(survey) for survey in services.project_surveys(project_id)]
 
 
+# Sites de l'affaire dans la base métier : [{ "id", "longitude", "latitude" }] (position null si absente). 404 affaire inconnue.
+@router.get("/projects/{project_id:path}/sites")
+def project_sites(project_id: str) -> list[dict[str, Any]]:
+    return [schemas.site_json(site) for site in services.project_sites(project_id)]
+
+
 # « :path » : un numéro d'affaire peut contenir « / » (« PR.GT01.25.0082 / DE-16511 »), décodé
 # depuis « %2F » avant le routage. Les routes « …/surveys » sont déclarées avant celle de la fiche.
 # 201 ; 404 affaire inconnue, 422 affaire sans chantier, 409 sondage déjà présent.

@@ -574,3 +574,17 @@ def test_a_request_without_token_is_refused(client, bastille):
     app.dependency_overrides.clear()
 
     assert client.get("/projects").status_code == 401
+
+
+def test_project_sites_are_listed_with_their_position(client, refonte_database):
+    add_project(refonte_database, "95GT.23.0154", position=(2.3, 48.9))
+    add_site(refonte_database, "95GT.23.0154-B", "95GT.23.0154", position=None)
+
+    response = client.get("/projects/95GT.23.0154/sites")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"id": "95GT.23.0154", "longitude": 2.3, "latitude": 48.9},
+        {"id": "95GT.23.0154-B", "longitude": None, "latitude": None},
+    ]
+    assert client.get("/projects/inconnue/sites").status_code == 404

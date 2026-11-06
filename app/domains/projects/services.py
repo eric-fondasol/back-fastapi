@@ -13,6 +13,7 @@ from app.domains.projects.entities import (
     GeolocationStatus,
     Project,
     SearchCriteria,
+    Site,
     Survey,
     SurveyTally,
     classify,
@@ -57,6 +58,14 @@ def project_with_site_count(project_id: str) -> tuple[Project, int]:
     with refonte_transaction() as connection:
         found = _existing_project(connection, project_id)
         return found, len(queries.project_sites(connection, found.key))
+
+
+# Sites (chantiers) d'une affaire, dans la base métier : la carte ne connaît que l'uuid de l'entrepôt,
+# le front retrouve ici le site à éditer (données du site, US-CARTE-46).
+def project_sites(project_id: str) -> list[Site]:
+    with refonte_transaction() as connection:
+        found = _existing_project(connection, project_id)
+        return queries.project_sites(connection, found.key)
 
 
 def project_surveys(project_id: str) -> list[Survey]:

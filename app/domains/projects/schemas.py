@@ -16,6 +16,7 @@ from app.domains.projects.entities import (
     Coordinates,
     GeolocationStatus,
     Project,
+    Site,
     Survey,
     SurveyTally,
     coordinates_from_geolocation,
@@ -187,3 +188,12 @@ def label_json(label: tuple[int, str]) -> dict[str, Any]:
 # Les dates sont stockées sans fuseau, en UTC : rendues au format RFC 3339 (« …+00:00 »).
 def _date(value: datetime | None) -> str | None:
     return value.replace(tzinfo=UTC).isoformat(timespec="seconds") if value else None
+
+
+def site_json(site: Site) -> dict[str, Any]:
+    coordinates = site.coordinates
+    return {
+        "id": site.id,
+        "longitude": None if coordinates is None else coordinates.longitude,
+        "latitude": None if coordinates is None else coordinates.latitude,
+    }
