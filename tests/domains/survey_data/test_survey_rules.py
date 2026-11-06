@@ -65,6 +65,7 @@ def test_reference_levels_of_a_survey():
     assert errors(referenceLevels={"levels": {"eh": {"depth": 10}, "ee": {"depth": 5}}}) == [
         "Niveaux caractéristiques : norme obligatoire.",
         "Niveaux caractéristiques : référentiel obligatoire.",
+        "Niveaux caractéristiques : EB, EH et EE doivent tous être saisis en m/TA.",
         "Niveaux caractéristiques : EE doit être supérieur ou égal à EH (m/TA).",
     ]
 

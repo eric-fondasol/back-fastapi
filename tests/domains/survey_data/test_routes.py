@@ -9,7 +9,8 @@ from tests.domains.projects.test_routes import add_project, add_survey
 
 AGENT = Profile(id="0d4f5c2e-7a3b-4c1d-9e8f-123456789abc", azure_oid="oid-agent", email="agent@fondasol.fr", display_name="Agent Test")
 SITE = "95GT.23.0154"
-LEVELS = {"eb": {"depth": 3.5, "ref": 31.5}, "eh": {"depth": 4, "ref": None}, "ee": {"depth": None, "ref": None}}
+LEVELS = {"eb": {"depth": 3.5, "ref": 31.5}, "eh": {"depth": 4, "ref": 32}, "ee": {"depth": 5, "ref": 33}}
+DEPTHS = {"eb": {"depth": 1}, "eh": {"depth": 2}, "ee": {"depth": 3}}
 
 
 @pytest.fixture
@@ -52,16 +53,16 @@ def test_a_site_without_structures_returns_its_altitude(client, site):
 def test_replaces_the_site_structures_and_returns_them(client, site):
     first = client.put(
         f"/sites/{SITE}/reference-levels",
-        json={"structures": [{"structure": "Bât. B", "standardId": 1, "referentiel": "NGF", "levels": LEVELS}, {"structure": "Bât. A", "standardId": None, "referentiel": None}]},
+        json={"structures": [{"structure": "Bât. B", "standardId": 1, "referentiel": "NGF", "levels": LEVELS}, {"structure": "Bât. A", "standardId": 2, "referentiel": "NGF", "levels": DEPTHS}]},
     )
     assert first.status_code == 200
     assert [entry["structure"] for entry in first.json()["structures"]] == ["Bât. A", "Bât. B"]
     assert first.json()["structures"][1]["levels"]["eb"] == {"depth": 3.5, "ref": 31.5}
 
-    second = client.put(f"/sites/{SITE}/reference-levels", json={"structures": [{"structure": "Immeuble", "standardId": 2, "referentiel": "LUREF", "levels": {"ee": {"depth": 1}}}]})
+    second = client.put(f"/sites/{SITE}/reference-levels", json={"structures": [{"structure": "Immeuble", "standardId": 2, "referentiel": "LUREF", "levels": DEPTHS}]})
     assert second.status_code == 200
     assert rows(site) == [
-        {"site_id": SITE, "survey_id": None, "structure": "Immeuble", "standard_id": 2, "referentiel": "LUREF", "eb_depth": None, "eb_ref": None, "eh_depth": None}
+        {"site_id": SITE, "survey_id": None, "structure": "Immeuble", "standard_id": 2, "referentiel": "LUREF", "eb_depth": 1.0, "eb_ref": None, "eh_depth": 2.0}
     ]
     assert client.get(f"/sites/{SITE}/reference-levels").json()["structures"][0]["structure"] == "Immeuble"
 
@@ -81,7 +82,7 @@ def test_refuses_a_level_order_against_the_rule_without_saving_anything(client, 
 
     response = client.put(
         f"/sites/{SITE}/reference-levels",
-        json={"structures": [{"structure": "Bât. A", "standardId": 1, "referentiel": "NGF", "levels": {"eh": {"depth": 10}, "ee": {"depth": 5}}}]},
+        json={"structures": [{"structure": "Bât. A", "standardId": 1, "referentiel": "NGF", "levels": {"eb": {"depth": 1}, "eh": {"depth": 10}, "ee": {"depth": 5}}}]},
     )
 
     assert response.status_code == 422
@@ -92,6 +93,8 @@ def test_refuses_a_level_order_against_the_rule_without_saving_anything(client, 
 @pytest.mark.parametrize(
     ("structures", "message"),
     [
+        ([{"structure": "Piscine2", "standardId": 1, "referentiel": "NGF"}], "EB, EH et EE obligatoires"),
+        ([{"structure": "A", "standardId": 1, "referentiel": "NGF", "levels": {"eb": {"depth": 1}}}], "EB, EH et EE doivent tous être saisis en m/TA"),
         ([{"structure": "A"}, {"structure": "a"}], "ouvrage en double"),
         ([{"structure": "A", "levels": {"eb": {"depth": 1}}}], "norme obligatoire"),
         ([{"structure": "A", "standardId": 9, "referentiel": "NGF"}], "norme inconnue (9)"),

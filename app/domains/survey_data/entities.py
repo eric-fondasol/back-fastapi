@@ -187,8 +187,24 @@ def structure_errors(structures: list[StructureLevels], standard_ids: set[int], 
             errors.append(f"{label} : norme inconnue ({entry.standard_id}).")
         if entry.referentiel is not None and entry.referentiel not in referentiel_codes:
             errors.append(f"{label} : référentiel inconnu ({entry.referentiel}).")
-        errors.extend(f"{label} : {message}" for message in level_order_errors(entry.levels))
+        errors.extend(f"{label} : {message}" for message in level_completeness_errors(entry.levels, required=True) + level_order_errors(entry.levels))
 
+    return errors
+
+
+# EB, EH et EE : une colonne commencée (m/TA ou m/réf.) doit les avoir tous les trois ; au site, au moins
+# une colonne complète est obligatoire (retour du responsable du projet, 06/11/2026).
+def level_completeness_errors(levels: dict[str, Level], required: bool) -> list[str]:
+    errors = []
+    started = False
+    for column, unit in (("depth", "m/TA"), ("ref", "m/réf")):
+        values = [getattr(levels.get(level_id, Level()), column) for level_id in LEVEL_IDS]
+        if any(value is not None for value in values):
+            started = True
+            if any(value is None for value in values):
+                errors.append(f"EB, EH et EE doivent tous être saisis en {unit}.")
+    if required and not started:
+        errors.append("EB, EH et EE obligatoires (en m/TA, en m/réf. ou les deux).")
     return errors
 
 

@@ -3,7 +3,7 @@
 
 from datetime import date
 
-from app.domains.survey_data.entities import level_order_errors
+from app.domains.survey_data.entities import level_completeness_errors, level_order_errors
 from app.domains.survey_data.survey_entities import HYDRO_MODES, SurveyData
 
 EM_MAX = 9999.99
@@ -116,7 +116,8 @@ def reference_level_errors(data: SurveyData, standard_ids: set[int], referentiel
         errors.append(f"Niveaux caractéristiques : norme inconnue ({reference.standard_id}).")
     if reference.referentiel is not None and reference.referentiel not in referentiel_codes:
         errors.append(f"Niveaux caractéristiques : référentiel inconnu ({reference.referentiel}).")
-    return errors + [f"Niveaux caractéristiques : {message}" for message in level_order_errors(reference.levels)]
+    messages = level_completeness_errors(reference.levels, required=False) + level_order_errors(reference.levels)
+    return errors + [f"Niveaux caractéristiques : {message}" for message in messages]
 
 
 def hydrodynamic_errors(data: SurveyData) -> list[str]:
