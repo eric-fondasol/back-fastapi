@@ -122,7 +122,8 @@ def test_the_project_list_keeps_the_items_count_envelope_and_legacy_fields(clien
     assert project["GeolocationStatus"] == "surveys_to_geolocate"
     assert set(project) == {
         "ID", "Name", "City", "Latitude", "Longitude", "Altitude", "NoGeoProjectReasonID", "ProjectTypeID", "CityAgency",
-        "CodeMetier", "Client", "UUID", "ExterneId", "UrlID", "IsDocGed", "IsDocGedUpdatedBy", "IsDocGedUpdatedAt", "UserEmail",
+        "CodeMetier", "Client", "UUID", "ExterneId", "UrlID", "IsDocGed", "IsDocGedUpdatedBy", "IsDocGedUpdatedAt",
+        "NoDocsGedReasonID", "NoDocsGedReason", "UserEmail",
         "SystemeGeo", "LatitudeSaisie",
         "LongitudeSaisie", "NbSurveys", "NbSurveysGeoloc", "GeolocationStatus", "UpdatedAt",
     }
@@ -515,6 +516,106 @@ def test_the_ged_presence_of_an_unknown_project_is_not_found(client, bastille):
     assert client.patch("/projects/INCONNUE/ged-presence", json={"IsDocGed": True}).status_code == 404
 
 
+def add_no_docs_ged_reasons(engine):
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO no_docs_ged_reasons (id, libelle) VALUES (1, 'Documents introuvables'), (2, 'Sans suite')"))
+
+
+def test_the_no_docs_ged_reasons_are_listed(client, bastille):
+    add_no_docs_ged_reasons(bastille)
+
+    assert client.get("/no-docs-ged-reasons").json() == [{"ID": 1, "Libelle": "Documents introuvables"}, {"ID": 2, "Libelle": "Sans suite"}]
+
+
+def test_a_missing_ged_presence_is_declared_with_its_reason_and_traced(client, bastille):
+    add_no_docs_ged_reasons(bastille)
+
+    response = client.patch("/projects/A-2026-001/ged-presence", json={"IsDocGed": False, "NoDocsGedReasonID": 2})
+
+    assert response.status_code == 200
+    assert (response.json()["IsDocGed"], response.json()["NoDocsGedReasonID"], response.json()["NoDocsGedReason"]) == (False, 2, "Sans suite")
+    assert scalar(bastille, "SELECT no_docs_ged_reason_id FROM docs_ged_changes") == 2
+    assert client.get("/projects/A-2026-001").json()["NoDocsGedReason"] == "Sans suite"
+
+
+def test_declaring_documents_present_drops_the_previous_reason(client, bastille):
+    add_no_docs_ged_reasons(bastille)
+    client.patch("/projects/A-2026-001/ged-presence", json={"IsDocGed": False, "NoDocsGedReasonID": 1})
+
+    body = client.patch("/projects/A-2026-001/ged-presence", json={"IsDocGed": True}).json()
+
+    assert (body["IsDocGed"], body["NoDocsGedReasonID"], body["NoDocsGedReason"]) == (True, None, "")
+
+
+@pytest.mark.parametrize(
+    ("body", "status"),
+    [
+        ({"IsDocGed": True, "NoDocsGedReasonID": 1}, 400),
+        ({"IsDocGed": False, "NoDocsGedReasonID": "1"}, 400),
+        ({"IsDocGed": False, "NoDocsGedReasonID": True}, 400),
+        ({"IsDocGed": False, "NoDocsGedReasonID": 99}, 422),
+    ],
+    ids=["reason with documents", "text reason", "boolean reason", "unknown reason"],
+)
+def test_an_invalid_no_docs_ged_reason_is_refused(client, bastille, body, status):
+    add_no_docs_ged_reasons(bastille)
+
+    assert client.patch("/projects/A-2026-001/ged-presence", json=body).status_code == status
+    assert scalar(bastille, "SELECT count(*) FROM docs_ged_changes") == 0
+
+
+def test_a_site_is_relocated_alone_with_its_altitude_and_traced(client, refonte_database):
+    add_project(refonte_database, "95GT.23.0154", position=(2.3, 48.9), altitude=50.0)
+    add_site(refonte_database, "95GT.23.0154-B", "95GT.23.0154", position=(2.4, 48.8))
+
+    response = client.put("/sites/95GT.23.0154/position", json={"longitude": 2.35, "latitude": 48.95, "altitude": 52.5})
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "95GT.23.0154", "longitude": 2.35, "latitude": 48.95, "altitude": 52.5, "surveyCount": 0}
+    assert scalar(refonte_database, "SELECT ST_X(geometry) FROM sites WHERE id = '95GT.23.0154-B'") == pytest.approx(2.4)
+    assert scalar(refonte_database, "SELECT latitude FROM sites WHERE id = '95GT.23.0154'") == pytest.approx(48.95)
+    assert history(refonte_database) == [("95GT.23.0154", None, key("95GT.23.0154"), 2.3, 48.9, 50.0, AGENT.id, AGENT.email)]
+
+
+def test_a_site_without_position_receives_only_an_altitude(client, refonte_database):
+    add_project(refonte_database, "95GT.23.0154", position=None)
+    add_site(refonte_database, "95GT.23.0154-B", "95GT.23.0154", position=None)
+
+    response = client.put("/sites/95GT.23.0154-B/position", json={"longitude": None, "latitude": None, "altitude": 12.0})
+
+    assert response.json() == {"id": "95GT.23.0154-B", "longitude": None, "latitude": None, "altitude": 12.0, "surveyCount": 0}
+    assert scalar(refonte_database, "SELECT geometry IS NULL FROM sites WHERE id = '95GT.23.0154-B'") is True
+
+
+def test_a_site_with_surveys_is_not_relocated(client, refonte_database):
+    add_project(refonte_database, "95GT.23.0154", position=(2.3, 48.9))
+    add_survey(refonte_database, "95GT.23.0154_SP1", "95GT.23.0154")
+
+    response = client.put("/sites/95GT.23.0154/position", json={"longitude": 2.35, "latitude": 48.95, "altitude": 52.5})
+
+    assert response.status_code == 409
+    assert scalar(refonte_database, "SELECT ST_X(geometry) FROM sites WHERE id = '95GT.23.0154'") == pytest.approx(2.3)
+    assert history(refonte_database) == []
+
+
+@pytest.mark.parametrize(
+    ("site_id", "body", "status"),
+    [
+        ("95GT.23.0154", {"longitude": 2.3, "latitude": None, "altitude": None}, 400),
+        ("95GT.23.0154", {"longitude": 400, "latitude": 48.9, "altitude": None}, 400),
+        ("95GT.23.0154", {"longitude": 2.3, "latitude": 48.9}, 400),
+        ("95GT.23.0154", {"longitude": 2.3, "latitude": 48.9, "altitude": "haut"}, 400),
+        ("INCONNU", {"longitude": 2.3, "latitude": 48.9, "altitude": None}, 404),
+    ],
+    ids=["half position", "out of bounds", "altitude missing", "text altitude", "unknown site"],
+)
+def test_an_invalid_site_position_is_refused(client, refonte_database, site_id, body, status):
+    add_project(refonte_database, "95GT.23.0154", position=(2.3, 48.9))
+
+    assert client.put(f"/sites/{site_id}/position", json=body).status_code == status
+    assert history(refonte_database) == []
+
+
 def test_a_survey_added_to_a_project_is_created_on_its_site(client, bastille):
     response = client.post("/projects/A-2026-001/surveys", json={"Name": "NvS1", "Latitude": 48.8570, "Longitude": 2.3530, "Altitude": 35.5})
 
@@ -579,12 +680,14 @@ def test_a_request_without_token_is_refused(client, bastille):
 def test_project_sites_are_listed_with_their_position(client, refonte_database):
     add_project(refonte_database, "95GT.23.0154", position=(2.3, 48.9))
     add_site(refonte_database, "95GT.23.0154-B", "95GT.23.0154", position=None)
+    add_survey(refonte_database, "95GT.23.0154_SP1", "95GT.23.0154")
+    add_survey(refonte_database, "95GT.23.0154_SP2", "95GT.23.0154")
 
     response = client.get("/projects/95GT.23.0154/sites")
 
     assert response.status_code == 200
     assert response.json() == [
-        {"id": "95GT.23.0154", "longitude": 2.3, "latitude": 48.9},
-        {"id": "95GT.23.0154-B", "longitude": None, "latitude": None},
+        {"id": "95GT.23.0154", "longitude": 2.3, "latitude": 48.9, "altitude": None, "surveyCount": 2},
+        {"id": "95GT.23.0154-B", "longitude": None, "latitude": None, "altitude": None, "surveyCount": 0},
     ]
     assert client.get("/projects/inconnue/sites").status_code == 404

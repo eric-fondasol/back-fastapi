@@ -19,13 +19,14 @@ from app.domains.projects.entities import (
     classify,
     nearest_site,
 )
-from app.domains.projects.schemas import PositionChange, SurveyAddition
+from app.domains.projects.schemas import GedPresence, PositionChange, SitePosition, SurveyAddition
 from app.domains.projects.sources import GedResponse
 
 REFERENCE_TABLES = {
     "project-types": "project_types",
     "no-geo-project-reasons": "no_geo_project_reasons",
     "no-geo-survey-reasons": "no_geo_survey_reasons",
+    "no-docs-ged-reasons": "no_docs_ged_reasons",
 }
 
 
@@ -100,12 +101,35 @@ def relocate_survey(survey_id: str, change: PositionChange, author: Profile) -> 
 
 
 # Présence de documents GED déclarée par un utilisateur : écrase la valeur du script de la GED.
-def set_ged_presence(project_id: str, present: bool, username: str) -> Project:
+# Un motif inconnu de no_docs_ged_reasons est refusé (422).
+def set_ged_presence(project_id: str, presence: GedPresence, username: str) -> Project:
     with refonte_transaction() as connection:
         found = _existing_project(connection, project_id)
-        changed = replace(found, is_doc_ged=present, is_doc_ged_updated_by=username, is_doc_ged_updated_at=_now())
+        reason_id = presence.no_docs_reason_id
+        if reason_id is not None and not queries.has_no_docs_ged_reason(connection, reason_id):
+            raise Unprocessable(f"Motif d'absence de documents GED inconnu : {reason_id}")
+        changed = replace(
+            found,
+            is_doc_ged=presence.present,
+            is_doc_ged_updated_by=username,
+            is_doc_ged_updated_at=_now(),
+            no_docs_ged_reason_id=reason_id,
+        )
         queries.update_ged_presence(connection, changed, found.is_doc_ged)
-        return changed
+        return queries.find_project(connection, project_id) or changed
+
+
+# Position et altitude d'un site de l'affaire, remplacées telles que saisies. 404 site inconnu.
+def relocate_site(site_id: str, position: SitePosition, author: Profile) -> Site:
+    with refonte_transaction() as connection:
+        found = queries.find_site(connection, site_id)
+        if found is None:
+            raise NotFound(f"Site introuvable : {site_id}")
+        if found.survey_count > 0:
+            raise Conflict(f"Le site {site_id} a des sondages : seul un site sans sondage peut être géolocalisé.")
+        relocated = replace(found, coordinates=position.coordinates, altitude=position.altitude)
+        queries.relocate_site(connection, relocated, author.id, author.email)
+        return relocated
 
 
 # Le sondage rejoint le chantier de l'affaire le plus proche, sous l'identifiant « <affaire>_<nom> ».

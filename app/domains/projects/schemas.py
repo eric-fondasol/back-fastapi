@@ -45,14 +45,56 @@ class SurveyAddition:
     altitude: float | None
 
 
-# Corps de PATCH /projects/…/ged-presence : { "IsDocGed": true | false }.
-def ged_presence(payload: dict[str, Any]) -> bool:
+@dataclass(frozen=True)
+class GedPresence:
+    present: bool
+    no_docs_reason_id: int | None = None
+
+
+# Corps de PATCH /projects/…/ged-presence : { "IsDocGed": true | false, "NoDocsGedReasonID": id | null }.
+# Le motif (table no_docs_ged_reasons) précise un « non » : documents introuvables, sans suite…
+def ged_presence(payload: dict[str, Any]) -> GedPresence:
     present = payload.get("IsDocGed")
 
     if not isinstance(present, bool):
         raise InvalidRequest("IsDocGed booléen attendu.")
 
-    return present
+    reason = payload.get("NoDocsGedReasonID")
+
+    if reason is None:
+        return GedPresence(present)
+
+    if isinstance(reason, bool) or not isinstance(reason, int):
+        raise InvalidRequest("NoDocsGedReasonID entier attendu.")
+
+    if present:
+        raise InvalidRequest("NoDocsGedReasonID n'accompagne qu'une absence de documents.")
+
+    return GedPresence(present, reason)
+
+
+# Corps de PUT /sites/…/position : { "longitude", "latitude", "altitude" }, chacun nombre ou null ;
+# longitude et latitude vont ensemble.
+@dataclass(frozen=True)
+class SitePosition:
+    coordinates: Coordinates | None
+    altitude: float | None
+
+
+def site_position(payload: dict[str, Any]) -> SitePosition:
+    for name in ("longitude", "latitude", "altitude"):
+        if name not in payload:
+            raise InvalidRequest(f"{name} attendu (nombre ou null).")
+        if payload[name] is not None and not is_number(payload[name]):
+            raise InvalidRequest(f"{name} numérique attendu.")
+
+    longitude, latitude, altitude = payload["longitude"], payload["latitude"], payload["altitude"]
+
+    if (longitude is None) != (latitude is None):
+        raise InvalidRequest("longitude et latitude vont ensemble.")
+
+    coordinates = None if longitude is None else coordinates_of(float(longitude), float(latitude))
+    return SitePosition(coordinates, None if altitude is None else float(altitude))
 
 
 # L'identifiant arrive encodé en base64 dans l'URL : il peut contenir « / » ou une apostrophe.
@@ -143,6 +185,8 @@ def project_json(project: Project, tally: SurveyTally | None = None, status: Geo
         "IsDocGed": project.is_doc_ged,
         "IsDocGedUpdatedBy": project.is_doc_ged_updated_by or "",
         "IsDocGedUpdatedAt": _date(project.is_doc_ged_updated_at),
+        "NoDocsGedReasonID": project.no_docs_ged_reason_id,
+        "NoDocsGedReason": project.no_docs_ged_reason or "",
         "UserEmail": project.user_email or "",
         "SystemeGeo": entered.geodetic_system or "",
         "LatitudeSaisie": entered.latitude if entered.latitude is not None else 0.0,
@@ -196,4 +240,6 @@ def site_json(site: Site) -> dict[str, Any]:
         "id": site.id,
         "longitude": None if coordinates is None else coordinates.longitude,
         "latitude": None if coordinates is None else coordinates.latitude,
+        "altitude": site.altitude,
+        "surveyCount": site.survey_count,
     }

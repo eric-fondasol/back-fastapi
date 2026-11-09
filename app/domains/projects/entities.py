@@ -81,6 +81,8 @@ class Project:
     is_doc_ged: bool = False
     is_doc_ged_updated_by: str | None = None
     is_doc_ged_updated_at: datetime | None = None
+    no_docs_ged_reason_id: int | None = None
+    no_docs_ged_reason: str | None = None
     entered_position: EnteredPosition = field(default_factory=EnteredPosition)
     user_email: str | None = None
     updated_at: datetime | None = None
@@ -114,6 +116,8 @@ class Survey:
 class Site:
     id: str
     coordinates: Coordinates | None
+    altitude: float | None = None
+    survey_count: int = 0
 
 
 # Nombre de sondages d'une affaire, et parmi eux ceux qui sont traités (positionnés, ou marqués

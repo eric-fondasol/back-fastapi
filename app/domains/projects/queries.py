@@ -43,7 +43,8 @@ PROJECT_JOINS = """
         ORDER BY site.geometry IS NULL, site.id = p.project_number DESC, site.id LIMIT 1
     ) position ON true
     LEFT JOIN LATERAL (
-        SELECT change.user_email, change.changed_at FROM docs_ged_changes change
+        SELECT change.user_email, change.changed_at, change.no_docs_ged_reason_id, reason.libelle AS no_docs_ged_reason
+        FROM docs_ged_changes change LEFT JOIN no_docs_ged_reasons reason ON reason.id = change.no_docs_ged_reason_id
         WHERE change.project_id = p.id ORDER BY change.changed_at DESC LIMIT 1
     ) ged ON true
 """
@@ -52,7 +53,7 @@ PROJECT_COLUMNS = """
     p.id AS key, p.project_number, p.project_description, p.city, unit.libelle AS agency, lines.codes AS business_codes,
     p.client, p.is_doc_ged, p.no_geo_project_reason_id, p.project_type_id, p.updated_at,
     ST_X(position.geometry) AS longitude, ST_Y(position.geometry) AS latitude, position.altitude,
-    ged.user_email AS ged_updated_by, ged.changed_at AS ged_updated_at
+    ged.user_email AS ged_updated_by, ged.changed_at AS ged_updated_at, ged.no_docs_ged_reason_id, ged.no_docs_ged_reason
 """
 
 SURVEY_COLUMNS = """
@@ -229,10 +230,49 @@ def find_survey(connection: Connection, survey_id: str) -> Survey | None:
 
 def project_sites(connection: Connection, project_key: str) -> list[Site]:
     rows = connection.execute(
-        text("SELECT id, ST_X(geometry) AS longitude, ST_Y(geometry) AS latitude FROM sites WHERE project_id = :project_key ORDER BY id"),
+        text(f"SELECT {SITE_COLUMNS} FROM sites WHERE project_id = :project_key ORDER BY id"),
         {"project_key": project_key},
     ).mappings()
-    return [Site(row["id"], stored_coordinates(row["longitude"], row["latitude"])) for row in rows]
+    return [_site(row) for row in rows]
+
+
+def find_site(connection: Connection, site_id: str) -> Site | None:
+    row = connection.execute(text(f"SELECT {SITE_COLUMNS} FROM sites WHERE id = :site_id"), {"site_id": site_id}).mappings().first()
+    return _site(row) if row else None
+
+
+SITE_COLUMNS = (
+    "id, ST_X(geometry) AS longitude, ST_Y(geometry) AS latitude, altitude, "
+    "(SELECT count(*) FROM surveys sv WHERE sv.site_id = sites.id) AS survey_count"
+)
+
+
+def _site(row: Any) -> Site:
+    return Site(row["id"], stored_coordinates(row["longitude"], row["latitude"]), row["altitude"], row["survey_count"])
+
+
+# Position et altitude d'un seul site (édition des détails du site), après la trace de l'ancienne position
+# dans l'historique de géolocalisation, comme pour les sondages.
+def relocate_site(connection: Connection, site: Site, author_id: str, author_email: str) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO geolocation_correction_history (site_id, project_id, longitude, latitude, altitude, id_user, user_email) "
+            "SELECT id, project_id, ST_X(geometry), ST_Y(geometry), altitude, :author_id, :author_email FROM sites WHERE id = :site_id"
+        ),
+        {"site_id": site.id, "author_id": author_id, "author_email": author_email},
+    )
+    connection.execute(
+        text(
+            f"UPDATE sites SET geometry = {_point_sql('longitude', 'latitude')}, longitude = :longitude, latitude = :latitude, "
+            "altitude = :altitude, fiab_geo_sites = CASE WHEN CAST(:longitude AS double precision) IS NULL THEN fiab_geo_sites ELSE 1 END "
+            "WHERE id = :site_id"
+        ),
+        {"site_id": site.id, "altitude": site.altitude} | _position_parameters(site.coordinates),
+    )
+
+
+def has_no_docs_ged_reason(connection: Connection, reason_id: int) -> bool:
+    return connection.execute(text("SELECT 1 FROM no_docs_ged_reasons WHERE id = :id"), {"id": reason_id}).first() is not None
 
 
 def update_project(connection: Connection, project: Project) -> None:
@@ -248,11 +288,12 @@ def update_ged_presence(connection: Connection, project: Project, previous: bool
     connection.execute(text("UPDATE projects SET is_doc_ged = :is_doc_ged WHERE id = :key"), {"key": project.key, "is_doc_ged": project.is_doc_ged})
     connection.execute(
         text(
-            "INSERT INTO docs_ged_changes (project_id, is_doc_ged_old_value, is_doc_ged_new_value, user_email, changed_at) "
-            "VALUES (:key, :previous, :is_doc_ged, :updated_by, :updated_at)"
+            "INSERT INTO docs_ged_changes (project_id, is_doc_ged_old_value, is_doc_ged_new_value, no_docs_ged_reason_id, user_email, changed_at) "
+            "VALUES (:key, :previous, :is_doc_ged, :reason_id, :updated_by, :updated_at)"
         ),
         {
             "key": project.key,
+            "reason_id": project.no_docs_ged_reason_id,
             "previous": previous,
             "is_doc_ged": project.is_doc_ged,
             "updated_by": project.is_doc_ged_updated_by,
@@ -397,6 +438,8 @@ def _project(row: Any) -> Project:
         is_doc_ged=bool(row["is_doc_ged"]),
         is_doc_ged_updated_by=row["ged_updated_by"],
         is_doc_ged_updated_at=_naive_utc(row["ged_updated_at"]),
+        no_docs_ged_reason_id=None if row["is_doc_ged"] else row["no_docs_ged_reason_id"],
+        no_docs_ged_reason=None if row["is_doc_ged"] else row["no_docs_ged_reason"],
         updated_at=row["updated_at"],
     )
 

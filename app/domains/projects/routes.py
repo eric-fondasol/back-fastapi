@@ -38,7 +38,7 @@ def project_surveys(project_id: str) -> list[dict[str, Any]]:
     return [schemas.survey_json(survey) for survey in services.project_surveys(project_id)]
 
 
-# Sites de l'affaire dans la base métier : [{ "id", "longitude", "latitude" }] (position null si absente). 404 affaire inconnue.
+# Sites de l'affaire dans la base métier : [{ "id", "longitude", "latitude", "altitude", "surveyCount" }] (position null si absente). 404 affaire inconnue.
 @router.get("/projects/{project_id:path}/sites")
 def project_sites(project_id: str) -> list[dict[str, Any]]:
     return [schemas.site_json(site) for site in services.project_sites(project_id)]
@@ -60,6 +60,13 @@ def set_ged_presence(
     project_id: str, payload: dict[str, Any] = Depends(json_object), username: str = Depends(current_user)
 ) -> dict[str, Any]:
     return schemas.project_json(services.set_ged_presence(project_id, schemas.ged_presence(payload), username))
+
+
+# Position et altitude d'un site sans sondage (édition des détails du site sur la carte). 400 corps invalide,
+# 404 site inconnu, 409 site qui a des sondages.
+@router.put("/sites/{site_id:path}/position")
+def relocate_site(site_id: str, payload: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)) -> dict[str, Any]:
+    return schemas.site_json(services.relocate_site(site_id, schemas.site_position(payload), profile))
 
 
 @router.get("/projects/{project_id:path}")
@@ -102,6 +109,11 @@ def project_types() -> list[dict[str, Any]]:
 @router.get("/no-geo-project-reasons")
 def no_geo_project_reasons() -> list[dict[str, Any]]:
     return [schemas.label_json(label) for label in services.labels("no-geo-project-reasons")]
+
+
+@router.get("/no-docs-ged-reasons")
+def no_docs_ged_reasons() -> list[dict[str, Any]]:
+    return [schemas.label_json(label) for label in services.labels("no-docs-ged-reasons")]
 
 
 @router.get("/no-geo-survey-reasons")
