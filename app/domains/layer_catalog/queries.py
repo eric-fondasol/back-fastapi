@@ -43,14 +43,15 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     return None if row is None else dict(row)
 
 
-# Couche WMTS activée dont le back relaie les tuiles (params.relayed, migration 0010). None sinon.
+# Couche WMTS ou WMS activée dont le back relaie les tuiles (params.relayed, migrations 0010 et 0036).
+# None sinon.
 def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     row = connection.execute(
         text(
             """
-            SELECT code, url, params
+            SELECT code, kind, url, params
             FROM catalog_layers
-            WHERE code = :code AND enabled AND kind = 'wmts' AND (params ->> 'relayed')::boolean IS TRUE
+            WHERE code = :code AND enabled AND kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE
             """
         ),
         {"code": code},

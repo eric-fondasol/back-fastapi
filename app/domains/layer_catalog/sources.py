@@ -98,6 +98,10 @@ def wmts_tile(url: str, params: dict[str, Any], api_key: str, z: int, x: int, y:
         "TILECOL": x,
         "apikey": api_key,
     }
+    return _tile_image(url, query)
+
+
+def _tile_image(url: str, query: dict[str, Any]) -> tuple[bytes, str]:
     try:
         response = httpx.get(url, params=query, timeout=TIMEOUT_SECONDS, follow_redirects=True)
     except httpx.HTTPError as error:
@@ -111,6 +115,39 @@ def wmts_tile(url: str, params: dict[str, Any], api_key: str, z: int, x: int, y:
     if not content_type.startswith("image/"):
         raise FeatureServiceUnavailable(f"Réponse qui n'est pas une image ({content_type or 'sans type'})")
     return response.content, content_type
+
+
+WEB_MERCATOR_HALF_WIDTH = 20037508.342789244
+WMS_TILE_PIXELS = 256
+
+
+# Emprise EPSG:3857 (ouest, sud, est, nord) de la tuile z/x/y de la grille Web Mercator.
+def tile_extent(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+    side = 2 * WEB_MERCATOR_HALF_WIDTH / 2**z
+    west = -WEB_MERCATOR_HALF_WIDTH + x * side
+    north = WEB_MERCATOR_HALF_WIDTH - y * side
+    return west, north - side, west + side, north
+
+
+# Tuile d'un service WMS (GetMap sur l'emprise de la tuile), pour un service que le navigateur ne peut
+# pas lire lui-même. Le système de coordonnées s'appelle CRS en 1.3.0 et SRS avant. Une erreur WMS
+# arrive souvent en 200 avec du XML : c'est alors FeatureServiceUnavailable, comme pour une tuile WMTS.
+def wms_tile(url: str, params: dict[str, Any], z: int, x: int, y: int) -> tuple[bytes, str]:
+    version = str(params.get("version", "1.3.0"))
+    query = {
+        "SERVICE": "WMS",
+        "REQUEST": "GetMap",
+        "VERSION": version,
+        "LAYERS": params["layers"],
+        "STYLES": params.get("styles", ""),
+        "FORMAT": params.get("format", "image/png"),
+        "TRANSPARENT": "true",
+        "CRS" if version == "1.3.0" else "SRS": "EPSG:3857",
+        "BBOX": ",".join(str(value) for value in tile_extent(z, x, y)),
+        "WIDTH": WMS_TILE_PIXELS,
+        "HEIGHT": WMS_TILE_PIXELS,
+    }
+    return _tile_image(url, query)
 
 
 # API GeoJSON : chaque paramètre est repris, « {bbox} » remplacé par « ouest,sud,est,nord », la taille

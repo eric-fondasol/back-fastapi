@@ -45,8 +45,13 @@ def _private_api_key() -> str | None:
     return key.get_secret_value() if key is not None and key.get_secret_value() else None
 
 
-# Une couche relayée (tuiles demandées au back, qui ajoute la clé) n'est proposée que si la clé est
-# configurée : sans elle, ses tuiles seraient toutes en 404.
+def _needs_private_key(row: dict[str, Any]) -> bool:
+    return _relayed(row) and row["kind"] == "wmts"
+
+
+# Une couche WMTS relayée (tuiles demandées au back, qui ajoute la clé) n'est proposée que si la clé est
+# configurée : sans elle, ses tuiles seraient toutes en 404. Une couche WMS relayée ne l'est que parce
+# que son service n'autorise pas le navigateur à lire ses images (pas d'en-tête CORS) : aucune clé.
 def catalog() -> dict[str, Any]:
     with refonte_transaction() as connection:
         categories = queries.categories(connection)
@@ -55,7 +60,7 @@ def catalog() -> dict[str, Any]:
     has_key = _private_api_key() is not None
     return {
         "categories": [{"code": row["code"], "label": _localized(row["label_fr"], row["label_en"])} for row in categories],
-        "layers": [_layer_json(row) for row in layers if has_key or not _relayed(row)],
+        "layers": [_layer_json(row) for row in layers if has_key or not _needs_private_key(row)],
     }
 
 
@@ -63,15 +68,18 @@ class UnknownTileLayer(Exception):
     pass
 
 
-# Tuile d'une couche relayée, demandée au service privé avec la clé. UnknownTileLayer si le code ne
-# désigne pas une couche relayée activée, ou si la clé n'est pas configurée.
+# Tuile d'une couche relayée : WMTS demandée au service privé avec la clé, WMS demandée telle quelle.
+# UnknownTileLayer si le code ne désigne pas une couche relayée activée, ou si la clé qu'il faut à une
+# couche WMTS n'est pas configurée.
 def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:
-    api_key = _private_api_key()
-    if api_key is None:
-        raise UnknownTileLayer(code)
     with refonte_transaction() as connection:
         layer = queries.relayed_tile_layer(connection, code)
     if layer is None:
+        raise UnknownTileLayer(code)
+    if layer["kind"] == "wms":
+        return sources.wms_tile(layer["url"], layer["params"], z, x, y)
+    api_key = _private_api_key()
+    if api_key is None:
         raise UnknownTileLayer(code)
     return sources.wmts_tile(layer["url"], layer["params"], api_key, z, x, y)
 

@@ -33,7 +33,14 @@ NEARBY_LIMIT = 10
 
 # Seuls les agents de ce métier doivent répondre à « Avez-vous analysé votre fuseau ? » (ADR-0047).
 FUSEAU_ANALYSIS_BUSINESS_LINE = "GT"
-FUSEAU_ANALYSIS_ANSWERS = ("sold_a00196", "cannot_optimize", "later", "not_suitable")
+FUSEAU_ANALYSIS_ANSWERS = (
+    "sold_a00196",
+    "not_exploitable",
+    "investigation_mission",
+    "g2_pro_avp",
+    "imposed_program",
+    "later",
+)
 
 
 @dataclass(frozen=True)

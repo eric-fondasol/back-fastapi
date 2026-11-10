@@ -102,11 +102,25 @@ def test_the_answer_is_kept_with_each_version_and_asked_again_for_the_next(clien
     send(client, "POST", f"{path}/versions", {"data": DATA_AT_PARIS}, expected=422)
     send(client, "POST", f"{path}/versions", {"data": DATA_AT_PARIS, "fuseauAnalysis": "sold_a00196"}, expected=201)
     send(client, "PUT", f"{path}/versions/2", {"data": DATA_AT_PARIS}, expected=422)
-    send(client, "PUT", f"{path}/versions/2", {"data": DATA_AT_PARIS, "fuseauAnalysis": "not_suitable"})
+    send(client, "PUT", f"{path}/versions/2", {"data": DATA_AT_PARIS, "fuseauAnalysis": "g2_pro_avp"})
 
     with refonte_database.connect() as connection:
         answers = connection.execute(text("SELECT version, fuseau_analysis FROM saved_page_versions ORDER BY version")).all()
-    assert answers == [(1, "later"), (2, "not_suitable")]
+    assert answers == [(1, "later"), (2, "g2_pro_avp")]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["sold_a00196", "not_exploitable", "investigation_mission", "g2_pro_avp", "imposed_program", "later"],
+)
+def test_accepts_and_stores_each_current_fuseau_analysis_answer(client, refonte_database, surveys, answer):
+    as_agent_of(client, refonte_database, "31GT")
+    surveys["counts"] = pressio(25)
+
+    created = create(client, {"projectRef": "31GT.26.0134", "data": DATA_AT_PARIS, "fuseauAnalysis": answer})
+
+    assert scalar(refonte_database, "SELECT fuseau_analysis FROM saved_page_versions WHERE version = 1") == answer
+    assert created["version"]["version"] == 1
 
 
 @pytest.mark.parametrize(

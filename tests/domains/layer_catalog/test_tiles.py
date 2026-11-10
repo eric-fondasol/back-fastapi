@@ -15,6 +15,8 @@ VERSIONS = Path(__file__).parents[3] / "migrations" / "versions"
 API_KEY = "cle-de-test"
 SCAN25_TILE = "/layer-catalog/fr-ign-scan25/tiles/12/2074/1409"
 JPEG = b"\xff\xd8\xff\xe0tuile"
+PNG = b"\x89PNG\r\n\x1a\ntuile"
+LIDAR_TILE = "/layer-catalog/ca-qc-mrnf-hydro-surfacique-lidar/tiles/15/9687/11720"
 
 
 def migration(name):
@@ -29,6 +31,8 @@ def client(refonte_database, monkeypatch):
     with refonte_database.begin() as connection:
         for name in ("0007_layer_catalog", "0008_layer_catalog_france", "0009_catalog_feature_layers", "0010_catalog_scan25"):
             migration(name).seed(connection)
+        migration("0034_layer_catalog_canada").seed(connection)
+        migration("0036_relay_foret_ouverte_layers").relay(connection)
     monkeypatch.setattr(config, "ign_private_api_key", SecretStr(API_KEY))
     app.dependency_overrides[current_user] = lambda: "test@fondasol.fr"
 
@@ -139,3 +143,54 @@ def test_a_tile_request_without_token_is_refused(client):
     app.dependency_overrides.clear()
 
     assert client.get(SCAN25_TILE).status_code == 401
+
+
+def test_a_wms_layer_without_cors_is_relayed_as_a_getmap_on_the_tile_extent(client, monkeypatch):
+    upstream = Upstream(monkeypatch, content=PNG, content_type="image/png")
+
+    response = client.get(LIDAR_TILE)
+
+    assert response.status_code == 200
+    assert response.content == PNG
+    assert response.headers["content-type"] == "image/png"
+    [(url, params)] = upstream.calls
+    assert url == "https://geoegl.msp.gouv.qc.ca/ws/mffpecofor.fcgi"
+    assert (params["SERVICE"], params["REQUEST"], params["VERSION"], params["LAYERS"]) == ("WMS", "GetMap", "1.3.0", "hydrolidar_surfac")
+    assert (params["CRS"], params["WIDTH"], params["HEIGHT"], params["TRANSPARENT"]) == ("EPSG:3857", 256, 256, "true")
+    assert "apikey" not in params
+    west, south, east, north = (float(value) for value in params["BBOX"].split(","))
+    assert east - west == pytest.approx(1222.992, abs=0.01)
+    assert north - south == pytest.approx(east - west)
+    assert west == pytest.approx(-8190380.45, abs=1)
+    assert north == pytest.approx(5704036.80, abs=1)
+
+
+def test_a_relayed_wms_layer_needs_no_key_and_stays_in_the_catalog(client, monkeypatch):
+    monkeypatch.setattr(config, "ign_private_api_key", None)
+    Upstream(monkeypatch, content=PNG, content_type="image/png")
+
+    codes = catalog_codes(client)
+
+    assert codes["ca-qc-mrnf-hydro-surfacique-lidar"]["params"]["relayed"] is True
+    assert "relayed" not in codes["ca-qc-mrnf-topo-20k"]["params"]
+    assert client.get(LIDAR_TILE).status_code == 200
+
+
+def test_a_wms_error_sent_as_xml_with_a_200_is_a_502(client, monkeypatch):
+    Upstream(monkeypatch, content=b"<ServiceExceptionReport/>", content_type="text/xml")
+
+    assert client.get(LIDAR_TILE).status_code == 502
+
+
+def test_a_wms_layer_that_is_not_relayed_has_no_tiles(client, monkeypatch):
+    upstream = Upstream(monkeypatch, content=PNG, content_type="image/png")
+
+    assert client.get("/layer-catalog/ca-qc-mrnf-topo-20k/tiles/15/9687/11720").status_code == 404
+    assert upstream.calls == []
+
+
+def test_the_extent_of_a_tile_covers_the_world_at_zoom_zero_and_a_quarter_of_it_at_zoom_one():
+    half = sources.WEB_MERCATOR_HALF_WIDTH
+
+    assert sources.tile_extent(0, 0, 0) == (-half, -half, half, half)
+    assert sources.tile_extent(1, 1, 0) == (0, 0, half, half)
