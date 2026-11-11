@@ -67,7 +67,6 @@ def test_the_azure_department_moves_to_department_and_only_a_known_code_becomes_
 
 def test_a_role_is_granted_once_per_user_and_goes_with_the_user(refonte_database):
     with refonte_database.begin() as connection:
-        connection.execute(text("INSERT INTO roles (code, libelle) VALUES ('admin', 'Administrateur')"))
         connection.execute(text("INSERT INTO users (id, email, created_at) VALUES ('00000000-0000-0000-0000-000000000001', 'a@fondasol.fr', now())"))
         connection.execute(text("INSERT INTO user_roles (user_id, role_code, granted_at) VALUES ('00000000-0000-0000-0000-000000000001', 'admin', now())"))
 

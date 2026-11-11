@@ -29,6 +29,7 @@ def me(identity: Identity = Depends(current_identity)) -> dict[str, Any]:
         "department": profile.department,
         "businessUnitCode": profile.business_unit_code,
         "businessLine": profile.business_line,
+        "roles": list(profile.roles),
     }
 
 

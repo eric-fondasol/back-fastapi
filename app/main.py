@@ -8,6 +8,7 @@ from app.core.audit import audit
 from app.core.auth import current_user, dev_token
 from app.core.config import config
 from app.core.errors import DomainError, domain_error_response
+from app.domains.admin.routes import router as admin_router
 from app.domains.canada.routes import router as canada_router
 from app.domains.france.routes import router as france_router
 from app.domains.luxembourg.routes import router as luxembourg_router
@@ -68,6 +69,7 @@ app.include_router(desk_study_router, dependencies=protected)
 app.include_router(france_router, dependencies=protected)
 app.include_router(canada_router, dependencies=protected)
 app.include_router(luxembourg_router, dependencies=protected)
+app.include_router(admin_router, dependencies=protected)
 
 
 @app.get("/", include_in_schema=False)

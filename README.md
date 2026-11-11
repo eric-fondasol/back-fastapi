@@ -100,6 +100,17 @@ le définir sur un serveur partagé.
 
 ---
 
+## Premiers administrateurs
+
+Un agent reçoit le rôle `user` à sa première connexion (migration `0037`, ADR-0060 du front). Le
+rôle `admin` se donne ensuite dans l'administration, ou, pour les premiers, par la commande :
+
+```bash
+docker exec solscore_fastapi python -m app.domains.admin.grant_admin prenom.nom@fondasol.fr
+```
+
+L'agent doit s'être connecté une fois (sinon : « Aucun profil pour … »).
+
 ## Tests
 
 ```bash
@@ -107,7 +118,7 @@ docker compose run --rm -v ./tests:/srv/tests api \
   sh -c "pip install --user -q pytest && python -m pytest -v tests"
 ```
 
-Avec `-v`, chaque test s'affiche avec son nom et son résultat. **634 tests**, dans 43
+Avec `-v`, chaque test s'affiche avec son nom et son résultat. **752 tests** au 11/11/2026 (le tableau ci-dessous date d'avant), dans 43
 fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 
 | Fichier | Tests | Dépend de |
