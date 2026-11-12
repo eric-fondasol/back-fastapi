@@ -7,7 +7,7 @@ from typing import Any
 from app.core.config import config
 from app.database.connection import refonte_transaction
 from app.domains.layer_catalog import queries, sources
-from app.domains.layer_catalog.geometry import Bbox, light_features
+from app.domains.layer_catalog.geometry import Bbox, light_features, pixel_degrees
 
 
 def _zoom(value: Decimal | None) -> float | None:
@@ -33,6 +33,7 @@ def _layer_json(row: dict[str, Any]) -> dict[str, Any]:
         "minZoom": _zoom(row["min_zoom"]),
         "maxZoom": _zoom(row["max_zoom"]),
         "renderer": row["renderer"],
+        "storedLegend": row["stored_legend"],
     }
 
 
@@ -68,14 +69,19 @@ class UnknownTileLayer(Exception):
     pass
 
 
-# Tuile d'une couche relayée : WMTS demandée au service privé avec la clé, WMS demandée telle quelle.
-# UnknownTileLayer si le code ne désigne pas une couche relayée activée, ou si la clé qu'il faut à une
-# couche WMTS n'est pas configurée.
+# Tuile d'une couche servie par le back : lue en base (database-tiles), WMTS demandée au service privé avec
+# la clé, WMS demandée telle quelle. UnknownTileLayer si le code ne désigne pas une telle couche activée, ou
+# si la clé qu'il faut à une couche WMTS n'est pas configurée ; TileNotFound hors de la zone couverte.
 def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:
     with refonte_transaction() as connection:
         layer = queries.relayed_tile_layer(connection, code)
+        stored = None if layer is None or layer["kind"] != "database-tiles" else queries.stored_tile(connection, layer["id"], z, x, y)
     if layer is None:
         raise UnknownTileLayer(code)
+    if layer["kind"] == "database-tiles":
+        if stored is None:
+            raise sources.TileNotFound()
+        return stored
     if layer["kind"] == "wms":
         return sources.wms_tile(layer["url"], layer["params"], z, x, y)
     api_key = _private_api_key()
@@ -101,10 +107,27 @@ def feature_collection(code: str, bbox: Bbox, zoom: int) -> dict[str, Any]:
     if min_zoom is not None and zoom < min_zoom:
         return {"type": "FeatureCollection", "features": [], "truncated": False}
 
-    fetch = sources.wfs_features if layer["kind"] == "wfs" else sources.geojson_features
-    found = fetch(layer["url"], layer["params"] or {}, bbox)
+    if layer["kind"] == "database":
+        with refonte_transaction() as connection:
+            found = queries.stored_features(connection, layer["id"], bbox, pixel_degrees(zoom), sources.MAX_FEATURES)
+    else:
+        fetch = sources.wfs_features if layer["kind"] == "wfs" else sources.geojson_features
+        found = fetch(layer["url"], layer["params"] or {}, bbox)
     return {
         "type": "FeatureCollection",
         "features": light_features(found, bbox, zoom),
         "truncated": len(found) >= sources.MAX_FEATURES,
     }
+
+
+class UnknownLegend(Exception):
+    pass
+
+
+# Image de légende stockée en base d'une couche activée (catalog_layer_legends). UnknownLegend sinon.
+def legend(code: str) -> tuple[bytes, str]:
+    with refonte_transaction() as connection:
+        stored = queries.stored_legend(connection, code)
+    if stored is None:
+        raise UnknownLegend(code)
+    return stored

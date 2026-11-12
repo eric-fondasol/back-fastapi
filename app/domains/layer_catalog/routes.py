@@ -41,7 +41,7 @@ def _bbox(value: str) -> Bbox:
     return west, south, east, north
 
 
-# Objets d'une couche vectorielle (WFS ou GeoJSON) dans l'emprise affichée, en GeoJSON allégé pour le
+# Objets d'une couche vectorielle (WFS, GeoJSON ou objets en base) dans l'emprise affichée, en GeoJSON allégé pour le
 # zoom (ADR-0045 du front) : { "type": "FeatureCollection", "features": [...], "truncated": bool }.
 @router.get("/layer-catalog/{code}/features")
 def layer_features(code: str, bbox: str = Query(...), zoom: int = Query(..., ge=0, le=MAX_ZOOM)) -> dict[str, Any]:
@@ -57,8 +57,9 @@ def layer_features(code: str, bbox: str = Query(...), zoom: int = Query(..., ge=
 # Une tuile change rarement : le navigateur la garde un jour, sans la partager (réponse authentifiée).
 TILE_CACHE_CONTROL = "private, max-age=86400"
 
-# Tuile d'une couche relayée (params.relayed, ADR-0046 du front) : le back la demande au service privé
-# avec sa clé d'API, que le navigateur ne voit jamais. Image du service, ou 404 hors couverture.
+# Tuile d'une couche servie par le back : relayée (params.relayed, ADR-0046 du front), le back la demande au
+# service avec sa clé d'API, que le navigateur ne voit jamais ; stockée (database-tiles, ADR-0062 du front),
+# il la lit en base. Image, ou 404 hors couverture.
 @router.get("/layer-catalog/{code}/tiles/{z}/{x}/{y}")
 def layer_tile(code: str, z: int = Path(ge=0, le=MAX_ZOOM), x: int = Path(ge=0), y: int = Path(ge=0)) -> Response:
     if x >= 2**z or y >= 2**z:
@@ -71,4 +72,14 @@ def layer_tile(code: str, z: int = Path(ge=0, le=MAX_ZOOM), x: int = Path(ge=0),
         raise HTTPException(status_code=404, detail="Tuile absente") from error
     except FeatureServiceUnavailable as error:
         raise HTTPException(status_code=502, detail=f"Service de la couche {code} injoignable") from error
+    return Response(content=content, media_type=content_type, headers={"Cache-Control": TILE_CACHE_CONTROL})
+
+
+# Image de légende stockée en base (ADR-0062 du front), mise en cache comme une tuile.
+@router.get("/layer-catalog/{code}/legend")
+def layer_legend(code: str) -> Response:
+    try:
+        content, content_type = services.legend(code)
+    except services.UnknownLegend as error:
+        raise HTTPException(status_code=404, detail=f"Légende de la couche {code} absente") from error
     return Response(content=content, media_type=content_type, headers={"Cache-Control": TILE_CACHE_CONTROL})

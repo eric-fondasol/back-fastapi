@@ -88,6 +88,7 @@ def test_the_migration_seeds_the_six_layers_once_held_by_the_front(client, refon
         "minZoom": 12.0,
         "maxZoom": 19.0,
         "renderer": None,
+        "storedLegend": False,
     }
     assert (by_code["fr-cadastre-etalab"]["kind"], by_code["fr-cadastre-etalab"]["renderer"]) == ("vector", "cadastre")
     assert by_code["ca-cadastre-lots"]["params"] == {"tileSize": 512, "fullScaleZoom": 15}
