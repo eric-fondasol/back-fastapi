@@ -16,6 +16,8 @@ from app.domains.profile import services
 router = APIRouter(prefix="/me", tags=["Profile"])
 
 NO_CONTENT = 204
+MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
+TILE_CACHE_CONTROL = "private, max-age=86400"
 
 
 # Profil de l'appelant (créé s'il n'existe pas encore) ; la connexion passe par PUT /me/sign-in.
@@ -163,9 +165,26 @@ def add_user_layer(raw: dict[str, Any] = Depends(json_object), profile: Profile 
     return services.add_user_layer(profile.id, raw).to_json()
 
 
-@router.get("/layers/{layer_id}/geojson")
-def user_layer_geojson(layer_id: str, profile: Profile = Depends(current_profile)) -> dict[str, Any]:
-    return services.user_layer_geojson(profile.id, layer_id)
+# Objets d'une couche fichier, envoyés par lots après sa création (ADR-0065 du front), puis fin de l'import.
+@router.post("/layers/{layer_id}/features", status_code=NO_CONTENT)
+def add_user_layer_features(
+    layer_id: str, raw: dict[str, Any] = Depends(json_object), profile: Profile = Depends(current_profile)
+) -> Response:
+    services.add_file_layer_features(profile.id, layer_id, raw)
+    return Response(status_code=NO_CONTENT)
+
+
+@router.post("/layers/{layer_id}/complete")
+def complete_user_layer(layer_id: str, profile: Profile = Depends(current_profile)) -> dict[str, Any]:
+    return services.complete_file_layer(profile.id, layer_id).to_json()
+
+
+# Tuile vectorielle Mapbox (MVT) d'une couche fichier. Une couche achevée ne change plus : le navigateur garde
+# la tuile un jour.
+@router.get("/layers/{layer_id}/tiles/{z}/{x}/{y}")
+def user_layer_tile(layer_id: str, z: int, x: int, y: int, profile: Profile = Depends(current_profile)) -> Response:
+    tile = services.file_layer_tile(profile.id, layer_id, z, x, y)
+    return Response(content=tile, media_type=MVT_MEDIA_TYPE, headers={"Cache-Control": TILE_CACHE_CONTROL})
 
 
 @router.patch("/layers/{layer_id}")

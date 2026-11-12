@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import text
 
-from tests.domains.profile.test_routes import OTHER, call, client, count  # noqa: F401
+from tests.domains.profile.test_routes import OTHER, SPIKE, call, client, count  # noqa: F401
 
 WMS = {
     "name": "  Géologie BRGM  ",
@@ -22,12 +22,7 @@ ZONE = {
     "geometry": {"type": "Polygon", "coordinates": [[[2.3, 48.8], [2.4, 48.8], [2.4, 48.9], [2.3, 48.8]]]},
     "properties": None,
 }
-FILE = {
-    "name": "Emprise du chantier",
-    "kind": "file",
-    "originalName": "emprise.kml",
-    "geojson": {"type": "FeatureCollection", "crs": {"type": "name"}, "features": [POINT, {**ZONE, "style": "rouge"}]},
-}
+FILE = {"name": "Emprise du chantier", "kind": "file", "originalName": "emprise.kml"}
 
 
 def test_adds_lists_renames_and_removes_a_stream(client, refonte_database):
@@ -120,64 +115,153 @@ def test_the_database_refuses_a_stream_without_url(refonte_database):
             )
 
 
-def test_adds_a_file_layer_whose_geojson_is_read_apart(client, refonte_database):
+def import_file(client, body=FILE, features=None, identity=SPIKE):
+    layer = call(client, "POST", "/me/layers", body, identity=identity).json()
+    call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": features or [POINT, {**ZONE, "style": "rouge"}]}, identity=identity)
+    return call(client, "POST", f"/me/layers/{layer['id']}/complete", identity=identity).json()
+
+
+def test_a_file_layer_is_created_empty_receives_its_features_in_batches_then_is_completed(client, refonte_database):
     created = call(client, "POST", "/me/layers", FILE)
 
     assert created.status_code == 201
     layer = created.json()
-    assert {key: layer[key] for key in ["name", "kind", "originalName", "bounds"]} == {
+    assert (layer["kind"], layer["bounds"], layer["featureCount"]) == ("file", None, 0)
+    assert call(client, "GET", "/me/layers").json() == []
+
+    assert call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": [POINT]}).status_code == 204
+    assert call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": [{**ZONE, "style": "rouge"}]}).status_code == 204
+    completed = call(client, "POST", f"/me/layers/{layer['id']}/complete")
+
+    assert completed.status_code == 200
+    assert {key: completed.json()[key] for key in ["name", "originalName", "fields", "featureCount"]} == {
         "name": "Emprise du chantier",
-        "kind": "file",
         "originalName": "emprise.kml",
-        "bounds": [2.3, 48.8, 2.4, 48.9],
+        "fields": ["nom"],
+        "featureCount": 2,
     }
-    assert "geojson" not in layer
-    assert [item["kind"] for item in call(client, "GET", "/me/layers").json()] == ["file"]
-
-    geojson = call(client, "GET", f"/me/layers/{layer['id']}/geojson")
-    assert (geojson.status_code, geojson.json()) == (
-        200,
-        {"type": "FeatureCollection", "features": [POINT, {**ZONE, "properties": {}}]},
-    )
+    assert completed.json()["bounds"] == pytest.approx([2.3, 48.8, 2.4, 48.9])
+    assert call(client, "GET", "/me/layers").json()[0]["featureCount"] == 2
+    assert call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": [POINT]}).status_code == 409
+    assert call(client, "POST", f"/me/layers/{layer['id']}/complete").status_code == 409
 
 
-def test_the_geojson_of_a_layer_is_read_by_its_owner_only(client, refonte_database):
-    layer = call(client, "POST", "/me/layers", FILE).json()
+def test_serves_the_features_of_a_file_layer_as_mapbox_vector_tiles(client, refonte_database):
+    layer = import_file(client)
+
+    tile = call(client, "GET", f"/me/layers/{layer['id']}/tiles/0/0/0")
+    with refonte_database.connect() as connection:
+        decoded = connection.execute(
+            text("SELECT count(*) FROM user_layer_features WHERE layer_id = :id"), {"id": layer["id"]}
+        ).scalar_one()
+
+    assert tile.status_code == 200
+    assert tile.headers["content-type"] == "application/vnd.mapbox-vector-tile"
+    assert tile.headers["cache-control"] == "private, max-age=86400"
+    assert b"features" in tile.content and b"nom" in tile.content and b"SC1" in tile.content
+    assert decoded == 2
+
+    far = call(client, "GET", f"/me/layers/{layer['id']}/tiles/10/0/0")
+    assert (far.status_code, far.content) == (200, b"")
+
+
+def test_the_tiles_and_batches_of_a_layer_belong_to_its_owner_only(client, refonte_database):
+    layer = import_file(client)
+    unfinished = call(client, "POST", "/me/layers", FILE).json()
     stream = call(client, "POST", "/me/layers", WMS).json()
 
-    assert call(client, "GET", f"/me/layers/{layer['id']}/geojson", identity=OTHER).status_code == 404
-    assert call(client, "GET", f"/me/layers/{stream['id']}/geojson").status_code == 404
-    assert call(client, "GET", "/me/layers/pas-un-uuid/geojson").status_code == 404
+    assert call(client, "GET", f"/me/layers/{layer['id']}/tiles/0/0/0", identity=OTHER).status_code == 404
+    assert call(client, "GET", f"/me/layers/{unfinished['id']}/tiles/0/0/0").status_code == 404
+    assert call(client, "GET", f"/me/layers/{stream['id']}/tiles/0/0/0").status_code == 404
+    assert call(client, "GET", f"/me/layers/{layer['id']}/tiles/1/2/0").status_code == 404
+    assert call(client, "GET", "/me/layers/pas-un-uuid/tiles/0/0/0").status_code == 404
+    assert call(client, "POST", f"/me/layers/{unfinished['id']}/features", {"features": [POINT]}, identity=OTHER).status_code == 404
+    assert call(client, "POST", f"/me/layers/{stream['id']}/features", {"features": [POINT]}).status_code == 404
+
+
+def test_removing_a_file_layer_removes_its_features(client, refonte_database):
+    layer = import_file(client)
+
+    call(client, "DELETE", f"/me/layers/{layer['id']}")
+
+    assert count(refonte_database, "user_layer_features") == 0
+
+
+def test_an_unfinished_import_is_removed_after_a_day_when_another_layer_is_added(client, refonte_database):
+    old = call(client, "POST", "/me/layers", FILE).json()
+    recent = call(client, "POST", "/me/layers", FILE).json()
+    with refonte_database.begin() as connection:
+        connection.execute(text("UPDATE user_layers SET created_at = now() - interval '25 hours' WHERE id = :id"), {"id": old["id"]})
+
+    call(client, "POST", "/me/layers", WMS)
+
+    with refonte_database.connect() as connection:
+        kept = set(connection.execute(text("SELECT id::text FROM user_layers WHERE kind = 'file'")).scalars())
+    assert kept == {recent["id"]}
+
+
+def test_refuses_to_complete_a_layer_without_features(client, refonte_database):
+    layer = call(client, "POST", "/me/layers", FILE).json()
+
+    response = call(client, "POST", f"/me/layers/{layer['id']}/complete")
+
+    assert (response.status_code, response.json()) == (422, {"errors": "La couche n'a recu aucun objet."})
+
+
+def test_refuses_more_than_the_maximum_number_of_features(client, refonte_database, monkeypatch):
+    monkeypatch.setattr("app.domains.profile.services.MAX_LAYER_FEATURES", 2)
+    layer = call(client, "POST", "/me/layers", FILE).json()
+    call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": [POINT, POINT]})
+
+    response = call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": [POINT]})
+
+    assert (response.status_code, response.json()) == (422, {"errors": "2 objets au plus par couche."})
+
+
+def test_keeps_the_part_of_a_feature_within_the_latitudes_of_web_mercator(client, refonte_database):
+    polar = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0, 89.9]}, "properties": {}}
+    layer = call(client, "POST", "/me/layers", FILE).json()
+
+    assert call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": [POINT, polar]}).status_code == 204
+    assert count(refonte_database, "user_layer_features") == 1
+
+
+def test_keeps_the_features_of_a_kml_with_altitudes_in_two_dimensions(client, refonte_database):
+    with_altitude = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [2.35, 48.85, 35.2]}, "properties": {}}
+    layer = call(client, "POST", "/me/layers", FILE).json()
+
+    assert call(client, "POST", f"/me/layers/{layer['id']}/features", {"features": [with_altitude]}).status_code == 204
+    with refonte_database.connect() as connection:
+        assert connection.execute(text("SELECT ST_NDims(geometry) FROM user_layer_features")).scalar_one() == 2
 
 
 LAMBERT_93 = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [652000, 6862000]}, "properties": {}}
 
 
 @pytest.mark.parametrize(
-    ("geojson", "message"),
+    ("body", "message"),
     [
-        ({"type": "Feature", "geometry": POINT["geometry"]}, "geojson doit etre une FeatureCollection."),
-        ({"type": "FeatureCollection", "features": []}, "geojson doit contenir de 1 a 50000 objets."),
+        ({"features": {"type": "Feature"}}, "features doit etre une liste de 1 a 5000 objets."),
+        ({"features": []}, "features doit etre une liste de 1 a 5000 objets."),
+        ({"features": [LAMBERT_93]}, "features[0] a des coordonnees hors WGS 84 (longitude, latitude en degres)."),
         (
-            {"type": "FeatureCollection", "features": [LAMBERT_93]},
-            "geojson.features[0] a des coordonnees hors WGS 84 (longitude, latitude en degres).",
+            {"features": [{**POINT, "geometry": {"type": "GeometryCollection", "geometries": []}}]},
+            "features[0].geometry doit valoir Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon.",
         ),
         (
-            {"type": "FeatureCollection", "features": [{**POINT, "geometry": {"type": "GeometryCollection", "geometries": []}}]},
-            "geojson.features[0].geometry doit valoir Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon.",
+            {"features": [{**POINT, "geometry": {"type": "Point", "coordinates": ["2", "48"]}}]},
+            "features[0] a des coordonnees hors WGS 84 (longitude, latitude en degres).",
         ),
-        (
-            {"type": "FeatureCollection", "features": [{**POINT, "geometry": {"type": "Point", "coordinates": ["2", "48"]}}]},
-            "geojson.features[0] a des coordonnees hors WGS 84 (longitude, latitude en degres).",
-        ),
-        ({"type": "FeatureCollection", "features": [{**POINT, "properties": [1]}]}, "geojson.features[0].properties doit etre un objet."),
+        ({"features": [{**POINT, "properties": [1]}]}, "features[0].properties doit etre un objet."),
     ],
 )
-def test_refuses_an_invalid_geojson(client, refonte_database, geojson, message):
-    response = call(client, "POST", "/me/layers", {**FILE, "geojson": geojson})
+def test_refuses_an_invalid_batch(client, refonte_database, body, message):
+    layer = call(client, "POST", "/me/layers", FILE).json()
+
+    response = call(client, "POST", f"/me/layers/{layer['id']}/features", body)
 
     assert (response.status_code, response.json()) == (400, {"errors": message})
-    assert count(refonte_database, "user_layers") == 0
+    assert count(refonte_database, "user_layer_features") == 0
 
 
 def test_refuses_a_file_layer_without_its_original_name(client, refonte_database):
@@ -186,20 +270,20 @@ def test_refuses_a_file_layer_without_its_original_name(client, refonte_database
     assert (response.status_code, response.json()) == (400, {"errors": "originalName doit etre un texte de 1 a 255 caracteres."})
 
 
-def test_the_database_refuses_a_file_without_geojson(refonte_database):
+def test_the_database_refuses_a_file_with_an_url(refonte_database):
     with pytest.raises(Exception, match="user_layers_source"):
         with refonte_database.begin() as connection:
             connection.execute(text("INSERT INTO users (id, email, created_at) VALUES ('6f1c2a3e-0b1d-4c55-9a77-1f2e3d4c5b6a', 'a@b.c', now())"))
             connection.execute(
                 text(
-                    "INSERT INTO user_layers (id, user_id, name, kind, created_at, updated_at) "
-                    "VALUES (gen_random_uuid(), '6f1c2a3e-0b1d-4c55-9a77-1f2e3d4c5b6a', 'x', 'file', now(), now())"
+                    "INSERT INTO user_layers (id, user_id, name, kind, url, created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), '6f1c2a3e-0b1d-4c55-9a77-1f2e3d4c5b6a', 'x', 'file', 'https://a.b', now(), now())"
                 )
             )
 
 
 def test_changes_the_style_of_a_file_layer_without_touching_its_name(client, refonte_database):
-    layer = call(client, "POST", "/me/layers", FILE).json()
+    layer = import_file(client)
     assert layer["style"] == {}
 
     style = {"color": "#1F9A48", "lineWidth": 3.5, "pointRadius": 8, "labelField": "nom"}

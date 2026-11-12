@@ -355,14 +355,21 @@ def remove_favorite_parcel(connection: Connection, user_id: str, country: str, r
     )
 
 
-# Depuis le schéma v3 (migration 0019), l'emprise d'un fichier n'est plus stockée : elle est calculée à
-# l'import et renvoyée avec la couche ajoutée, seul moment où le front s'en sert (cadrage sur le fichier).
-USER_LAYER_COLUMNS = "id, name, kind, url, params, created_at, original_name, style"
+# Emprise, champs et nombre d'objets d'une couche fichier : calculés à la fin de son import (migration 0043).
+USER_LAYER_COLUMNS = "id, name, kind, url, params, created_at, original_name, style, bounds, fields, feature_count"
+MERCATOR_LATITUDE = 85.0511
+MVT_EXTENT = 4096
+MVT_BUFFER = 64
+WEB_MERCATOR_WIDTH = 40075016.68
 
 
+# Couches achevées seulement : une couche fichier dont l'envoi n'est pas terminé n'est pas listée.
 def user_layers(connection: Connection, user_id: str) -> list[UserLayer]:
     rows = connection.execute(
-        text(f"SELECT {USER_LAYER_COLUMNS} FROM user_layers WHERE user_id = :user_id ORDER BY lower(name), created_at"),
+        text(
+            f"SELECT {USER_LAYER_COLUMNS} FROM user_layers "
+            "WHERE user_id = :user_id AND (kind <> 'file' OR imported_at IS NOT NULL) ORDER BY lower(name), created_at"
+        ),
         {"user_id": user_id},
     ).mappings()
     return [_user_layer(row) for row in rows]
@@ -377,9 +384,9 @@ def add_user_layer(connection: Connection, user_id: str, layer: UserLayer) -> No
         text(
             """
             INSERT INTO user_layers
-                (id, user_id, name, kind, url, params, geojson, original_name, created_at, updated_at)
+                (id, user_id, name, kind, url, params, original_name, created_at, updated_at)
             VALUES
-                (:id, :user_id, :name, :kind, :url, CAST(:params AS jsonb), CAST(:geojson AS jsonb), :original_name, :at, :at)
+                (:id, :user_id, :name, :kind, :url, CAST(:params AS jsonb), :original_name, :at, :at)
             """
         ),
         {
@@ -389,19 +396,118 @@ def add_user_layer(connection: Connection, user_id: str, layer: UserLayer) -> No
             "kind": layer.kind,
             "url": layer.url,
             "params": json.dumps(layer.params),
-            "geojson": None if layer.geojson is None else json.dumps(layer.geojson, separators=(",", ":")),
             "original_name": layer.original_name,
             "at": layer.created_at,
         },
     )
 
 
-# None si la couche n'existe pas, n'est pas un fichier ou appartient à un autre agent.
-def user_layer_geojson(connection: Connection, user_id: str, layer_uuid: str) -> dict[str, Any] | None:
-    return connection.execute(
-        text("SELECT geojson FROM user_layers WHERE user_id = :user_id AND id = :id AND kind = 'file'"),
+# Couches fichier dont l'envoi a été interrompu (onglet fermé, réseau coupé) avant la date donnée.
+def remove_unfinished_file_layers(connection: Connection, user_id: str, before: datetime) -> None:
+    connection.execute(
+        text("DELETE FROM user_layers WHERE user_id = :user_id AND kind = 'file' AND imported_at IS NULL AND created_at < :before"),
+        {"user_id": user_id, "before": before},
+    )
+
+
+# "missing" : pas de couche fichier de cet agent ; "complete" : import terminé ; "open" : lots acceptés.
+def file_layer_state(connection: Connection, user_id: str, layer_uuid: str) -> str:
+    imported_at = connection.execute(
+        text("SELECT imported_at IS NOT NULL FROM user_layers WHERE user_id = :user_id AND id = :id AND kind = 'file' FOR UPDATE"),
         {"user_id": user_id, "id": layer_uuid},
     ).scalar_one_or_none()
+    if imported_at is None:
+        return "missing"
+    return "complete" if imported_at else "open"
+
+
+def file_layer_feature_count(connection: Connection, layer_uuid: str) -> int:
+    return connection.execute(
+        text("SELECT count(*) FROM user_layer_features WHERE layer_id = :id"), {"id": layer_uuid}
+    ).scalar_one()
+
+
+# Géométries ramenées aux latitudes du Web Mercator, puis projetées en EPSG:3857 ; une géométrie vidée par la
+# découpe (objet au-delà de 85° de latitude) est écartée.
+def add_file_layer_features(connection: Connection, layer_uuid: str, features: list[dict[str, Any]]) -> None:
+    connection.execute(
+        text(
+            f"""
+            INSERT INTO user_layer_features (layer_id, geometry, properties)
+            SELECT :id, ST_Transform(clipped, 3857), properties
+            FROM (
+                SELECT ST_ClipByBox2D(
+                           ST_Force2D(ST_SetSRID(ST_GeomFromGeoJSON(feature -> 'geometry'), 4326)),
+                           ST_MakeEnvelope(-180, -{MERCATOR_LATITUDE}, 180, {MERCATOR_LATITUDE}, 4326)
+                       ) AS clipped,
+                       feature -> 'properties' AS properties
+                FROM jsonb_array_elements(CAST(:features AS jsonb)) AS feature
+            ) batch
+            WHERE NOT ST_IsEmpty(clipped)
+            """
+        ),
+        {"id": layer_uuid, "features": json.dumps(features, separators=(",", ":"))},
+    )
+
+
+# Fin de l'import : emprise en degrés, champs texte ou nombre, nombre d'objets ; la couche devient visible.
+def complete_file_layer(connection: Connection, user_id: str, layer_uuid: str, at: datetime) -> UserLayer:
+    row = connection.execute(
+        text(
+            f"""
+            UPDATE user_layers l
+            SET imported_at = :at, updated_at = :at,
+                bounds = ARRAY[ST_XMin(summary.extent), ST_YMin(summary.extent), ST_XMax(summary.extent), ST_YMax(summary.extent)],
+                feature_count = summary.count,
+                fields = COALESCE((
+                    SELECT jsonb_agg(DISTINCT entry.key ORDER BY entry.key)
+                    FROM user_layer_features f, jsonb_each(f.properties) AS entry
+                    WHERE f.layer_id = l.id AND jsonb_typeof(entry.value) IN ('string', 'number')
+                ), '[]'::jsonb)
+            FROM (
+                SELECT count(*)::integer AS count, ST_Extent(ST_Transform(geometry, 4326)) AS extent
+                FROM user_layer_features WHERE layer_id = :id
+            ) summary
+            WHERE l.user_id = :user_id AND l.id = :id
+            RETURNING {", ".join(f"l.{column.strip()}" for column in USER_LAYER_COLUMNS.split(","))}
+            """
+        ),
+        {"user_id": user_id, "id": layer_uuid, "at": at},
+    ).mappings().one()
+    return _user_layer(row)
+
+
+# Tuile vectorielle Mapbox (MVT) d'une couche fichier achevée de cet agent : None si la couche n'existe pas,
+# b"" si aucun objet ne touche la tuile. Les propriétés jsonb deviennent les attributs des objets. Les géométries
+# sont simplifiées à un pixel de la tuile : sur la carte géologique du BRGM (11 140 polygones), une tuile du zoom 8
+# passe de 1,7 à 1 Mo, calculée en deux fois moins de temps.
+def file_layer_tile(connection: Connection, user_id: str, layer_uuid: str, z: int, x: int, y: int) -> bytes | None:
+    found = connection.execute(
+        text("SELECT 1 FROM user_layers WHERE user_id = :user_id AND id = :id AND kind = 'file' AND imported_at IS NOT NULL"),
+        {"user_id": user_id, "id": layer_uuid},
+    ).scalar_one_or_none()
+    if found is None:
+        return None
+    tile = connection.execute(
+        text(
+            f"""
+            WITH bounds AS (
+                SELECT ST_TileEnvelope(:z, :x, :y) AS box,
+                       ST_TileEnvelope(:z, :x, :y, margin => {MVT_BUFFER / MVT_EXTENT}) AS wide
+            )
+            SELECT ST_AsMVT(tile, 'features', {MVT_EXTENT}, 'geom')
+            FROM (
+                SELECT ST_AsMVTGeom(ST_Simplify(f.geometry, :pixel, true), bounds.box, {MVT_EXTENT}, {MVT_BUFFER}, true) AS geom,
+                       f.properties
+                FROM user_layer_features f, bounds
+                WHERE f.layer_id = :id AND f.geometry && bounds.wide
+            ) tile
+            WHERE geom IS NOT NULL
+            """
+        ),
+        {"id": layer_uuid, "z": z, "x": x, "y": y, "pixel": WEB_MERCATOR_WIDTH / 2**z / MVT_EXTENT},
+    ).scalar_one()
+    return bytes(tile or b"")
 
 
 # None si la couche n'existe pas ou appartient à un autre agent.
@@ -451,8 +557,10 @@ def _user_layer(row: Any) -> UserLayer:
         dict(row["params"]),
         row["created_at"].astimezone(UTC),
         row["original_name"],
-        None,
+        tuple(row["bounds"]) if row["bounds"] else None,
         style=dict(row["style"]),
+        fields=list(row["fields"]),
+        feature_count=row["feature_count"],
     )
 
 

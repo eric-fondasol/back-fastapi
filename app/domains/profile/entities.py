@@ -396,8 +396,10 @@ TILE_FORMATS = ["image/png", "image/jpeg"]
 WMS_VERSIONS = ["1.3.0", "1.1.1"]
 XYZ_PLACEHOLDERS = ["{z}", "{x}", "{y}"]
 FILE_KIND = "file"
-MAX_GEOJSON_BYTES = 5 * 1024 * 1024
-MAX_FEATURES = 50_000
+# Objets d'une couche fichier envoyés par lots (ADR-0065 du front) : bornes d'un lot et d'une couche.
+MAX_BATCH_BYTES = 5 * 1024 * 1024
+MAX_BATCH_FEATURES = 5_000
+MAX_LAYER_FEATURES = 200_000
 MAX_ORIGINAL_NAME_LENGTH = 255
 HEX_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
 # Style d'une couche fichier (ADR-0039 du front) : (nom, minimum, maximum) des réglages numériques.
@@ -416,27 +418,17 @@ class UserLayer:
     created_at: datetime
     original_name: str | None = None
     bounds: tuple[float, float, float, float] | None = None
-    # Jamais renvoyé par to_json : la liste des couches reste légère, le GeoJSON a sa propre route.
-    geojson: dict[str, Any] | None = None
     style: dict[str, Any] = field(default_factory=dict)
+    fields: list[str] = field(default_factory=list)
+    feature_count: int = 0
 
     @classmethod
     def of(cls, layer_uuid: str, raw: dict[str, Any], created_at: datetime) -> "UserLayer":
         kind = raw.get("kind")
 
+        # Couche créée vide : ses objets arrivent par lots (POST /me/layers/{id}/features).
         if kind == FILE_KIND:
-            geojson, bounds = geojson_document(raw.get("geojson"))
-            return cls(
-                layer_uuid,
-                layer_name(raw.get("name")),
-                kind,
-                None,
-                {},
-                created_at,
-                _original_name(raw.get("originalName")),
-                bounds,
-                geojson,
-            )
+            return cls(layer_uuid, layer_name(raw.get("name")), kind, None, {}, created_at, _original_name(raw.get("originalName")))
 
         if kind not in FLOW_KINDS:
             raise InvalidRequest(f"kind doit valoir {', '.join(FLOW_KINDS + [FILE_KIND])}.")
@@ -458,6 +450,8 @@ class UserLayer:
                 "originalName": self.original_name,
                 "bounds": list(self.bounds) if self.bounds else None,
                 "style": self.style,
+                "fields": self.fields,
+                "featureCount": self.feature_count,
                 **created_at,
             }
 
@@ -535,47 +529,38 @@ def _original_name(value: Any) -> str:
     return value.strip()
 
 
-# GeoJSON WGS 84 (RFC 7946) : collection d'objets aux géométries simples, coordonnées en degrés.
-# On ne garde que type, geometry et properties : tout autre membre (crs, bbox, style…) est écarté.
-# Renvoie le document nettoyé et son emprise (ouest, sud, est, nord).
-def geojson_document(value: Any) -> tuple[dict[str, Any], tuple[float, float, float, float]]:
-    if not isinstance(value, dict) or value.get("type") != "FeatureCollection" or not isinstance(value.get("features"), list):
-        raise InvalidRequest("geojson doit etre une FeatureCollection.")
+# Lot d'objets GeoJSON WGS 84 (RFC 7946) d'une couche fichier : { "features": [...] }, géométries simples,
+# coordonnées en degrés. On ne garde que geometry et properties : tout autre membre (crs, bbox, style…) est écarté.
+def feature_batch(value: Any) -> list[dict[str, Any]]:
+    features = value.get("features") if isinstance(value, dict) else None
 
-    features = value["features"]
+    if not isinstance(features, list) or not features or len(features) > MAX_BATCH_FEATURES:
+        raise InvalidRequest(f"features doit etre une liste de 1 a {MAX_BATCH_FEATURES} objets.")
 
-    if not features or len(features) > MAX_FEATURES:
-        raise InvalidRequest(f"geojson doit contenir de 1 a {MAX_FEATURES} objets.")
-
-    positions: list[tuple[float, float]] = []
     kept = []
 
     for index, feature in enumerate(features):
         if not isinstance(feature, dict) or feature.get("type") != "Feature":
-            raise InvalidRequest(f"geojson.features[{index}] doit etre un Feature.")
+            raise InvalidRequest(f"features[{index}] doit etre un Feature.")
 
         geometry = feature.get("geometry")
         properties = feature.get("properties")
 
         if not isinstance(geometry, dict) or geometry.get("type") not in GEOMETRY_DEPTHS:
-            raise InvalidRequest(f"geojson.features[{index}].geometry doit valoir {', '.join(GEOMETRY_DEPTHS)}.")
+            raise InvalidRequest(f"features[{index}].geometry doit valoir {', '.join(GEOMETRY_DEPTHS)}.")
 
         if properties is not None and not isinstance(properties, dict):
-            raise InvalidRequest(f"geojson.features[{index}].properties doit etre un objet.")
+            raise InvalidRequest(f"features[{index}].properties doit etre un objet.")
 
-        if not _collect_positions(geometry.get("coordinates"), GEOMETRY_DEPTHS[geometry["type"]], positions):
-            raise InvalidRequest(f"geojson.features[{index}] a des coordonnees hors WGS 84 (longitude, latitude en degres).")
+        if not _collect_positions(geometry.get("coordinates"), GEOMETRY_DEPTHS[geometry["type"]], []):
+            raise InvalidRequest(f"features[{index}] a des coordonnees hors WGS 84 (longitude, latitude en degres).")
 
-        kept.append({"type": "Feature", "geometry": {"type": geometry["type"], "coordinates": geometry["coordinates"]}, "properties": properties or {}})
+        kept.append({"geometry": {"type": geometry["type"], "coordinates": geometry["coordinates"]}, "properties": properties or {}})
 
-    document = {"type": "FeatureCollection", "features": kept}
+    if len(json.dumps(kept, separators=(",", ":"))) > MAX_BATCH_BYTES:
+        raise InvalidRequest(f"Un lot ne doit pas depasser {MAX_BATCH_BYTES // (1024 * 1024)} Mo.")
 
-    if len(json.dumps(document, separators=(",", ":"))) > MAX_GEOJSON_BYTES:
-        raise InvalidRequest(f"geojson ne doit pas depasser {MAX_GEOJSON_BYTES // (1024 * 1024)} Mo.")
-
-    longitudes = [longitude for longitude, _ in positions]
-    latitudes = [latitude for _, latitude in positions]
-    return document, (min(longitudes), min(latitudes), max(longitudes), max(latitudes))
+    return kept
 
 
 def _collect_positions(coordinates: Any, depth: int, positions: list[tuple[float, float]]) -> bool:

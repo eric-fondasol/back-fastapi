@@ -3,15 +3,16 @@
 # Chaque fonction ouvre une transaction : tout ce qu'elle écrit est validé ensemble, ou rien.
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.core.errors import InvalidRequest, NotFound, Unprocessable
+from app.core.errors import Conflict, InvalidRequest, NotFound, Unprocessable
 from app.database.connection import refonte_transaction
 from app.domains.profile import queries
 from app.domains.profile.entities import (
     FAVORITE_ADDRESS_LIMIT,
     FAVORITE_SEARCH_LIMIT,
+    MAX_LAYER_FEATURES,
     USER_LAYER_LIMIT,
     USER_LAYER_PREFIX,
     FavoriteAddress,
@@ -22,6 +23,7 @@ from app.domains.profile.entities import (
     Preferences,
     UserLayer,
     coordinates_key,
+    feature_batch,
     department,
     layer_id,
     layer_name,
@@ -33,6 +35,10 @@ from app.domains.profile.entities import (
 
 
 # Les dates sont stockées à la seconde (timestamp(0)) : on arrondit avant, pour renvoyer ce qui est stocké.
+UNFINISHED_IMPORT_DELAY = timedelta(days=1)
+MAX_TILE_ZOOM = 22
+
+
 def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
 
@@ -220,11 +226,14 @@ def user_layers(user_id: str) -> list[UserLayer]:
         return queries.user_layers(connection, user_id)
 
 
-# 422 au-delà de USER_LAYER_LIMIT couches par agent.
+# 422 au-delà de USER_LAYER_LIMIT couches par agent. Une couche fichier est créée vide ; les couches fichier
+# restées inachevées plus de UNFINISHED_IMPORT_DELAY sont supprimées d'abord.
 def add_user_layer(user_id: str, raw: dict[str, Any]) -> UserLayer:
     layer = UserLayer.of(str(uuid.uuid4()), raw, _now())
 
     with refonte_transaction() as connection:
+        queries.remove_unfinished_file_layers(connection, user_id, layer.created_at - UNFINISHED_IMPORT_DELAY)
+
         if queries.user_layer_count(connection, user_id) >= USER_LAYER_LIMIT:
             raise Unprocessable(f"{USER_LAYER_LIMIT} couches au plus.")
 
@@ -251,18 +260,54 @@ def revise_user_layer(user_id: str, layer_uuid: str, raw: dict[str, Any]) -> Use
     return revised
 
 
-# 404 pour une couche absente, qui n'est pas un fichier, ou appartenant à un autre agent.
-def user_layer_geojson(user_id: str, layer_uuid: str) -> dict[str, Any]:
-    geojson = None
+# Lot d'objets d'une couche fichier en cours d'import. 404 : couche absente, pas un fichier, ou d'un autre agent ;
+# 409 : import déjà terminé ; 422 : plus de MAX_LAYER_FEATURES objets au total.
+def add_file_layer_features(user_id: str, layer_uuid: str, raw: dict[str, Any]) -> None:
+    features = feature_batch(raw)
 
-    if _is_uuid(layer_uuid):
+    with refonte_transaction() as connection:
+        _open_file_layer(connection, user_id, layer_uuid)
+
+        if queries.file_layer_feature_count(connection, layer_uuid) + len(features) > MAX_LAYER_FEATURES:
+            raise Unprocessable(f"{MAX_LAYER_FEATURES} objets au plus par couche.")
+
+        queries.add_file_layer_features(connection, layer_uuid, features)
+
+
+# Fin de l'import : la couche est listée, et n'accepte plus de lot. 422 si elle n'a reçu aucun objet.
+def complete_file_layer(user_id: str, layer_uuid: str) -> UserLayer:
+    with refonte_transaction() as connection:
+        _open_file_layer(connection, user_id, layer_uuid)
+
+        if queries.file_layer_feature_count(connection, layer_uuid) == 0:
+            raise Unprocessable("La couche n'a recu aucun objet.")
+
+        return queries.complete_file_layer(connection, user_id, layer_uuid, _now())
+
+
+# Tuile MVT d'une couche fichier achevée ; b"" si elle ne contient rien. 404 pour une couche absente, inachevée
+# ou d'un autre agent, ou une tuile hors de la grille.
+def file_layer_tile(user_id: str, layer_uuid: str, z: int, x: int, y: int) -> bytes:
+    tile = None
+
+    if _is_uuid(layer_uuid) and 0 <= z <= MAX_TILE_ZOOM and 0 <= x < 2**z and 0 <= y < 2**z:
         with refonte_transaction() as connection:
-            geojson = queries.user_layer_geojson(connection, user_id, layer_uuid)
+            tile = queries.file_layer_tile(connection, user_id, layer_uuid, z, x, y)
 
-    if geojson is None:
+    if tile is None:
+        raise NotFound(f"Tuile introuvable : {layer_uuid}/{z}/{x}/{y}")
+
+    return tile
+
+
+def _open_file_layer(connection, user_id: str, layer_uuid: str) -> None:
+    state = queries.file_layer_state(connection, user_id, layer_uuid) if _is_uuid(layer_uuid) else "missing"
+
+    if state == "missing":
         raise NotFound(f"Couche introuvable : {layer_uuid}")
 
-    return geojson
+    if state == "complete":
+        raise Conflict("L'import de cette couche est termine.")
 
 
 def remove_user_layer(user_id: str, layer_uuid: str) -> None:
