@@ -54,5 +54,6 @@ def refonte_database(refonte_schema):
         tables = connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars()
         emptied = ", ".join(f'"{table}"' for table in tables if table not in KEPT_TABLES)
         connection.execute(text(f"TRUNCATE {emptied} RESTART IDENTITY CASCADE"))
+        connection.execute(text("INSERT INTO roles (code, libelle) VALUES ('user', 'Utilisateur'), ('admin', 'Administrateur')"))
 
     return refonte_engine
