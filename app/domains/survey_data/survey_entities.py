@@ -15,7 +15,8 @@ MAX_ROWS = 2_000
 MAX_TEXT_LENGTH = 255
 MAX_MAGNITUDE = 1e6
 HYDRO_MODES = ("withdrawal", "injection")
-MACHINE_FIELDS = ("hammerDropHeight", "hammerMass", "anvilMass", "rodMass", "tipSection")
+MACHINE_FIELDS = ("hammerDropHeight", "hammerMass", "accessoriesMass", "rodMass", "tipMass", "tipSection", "penetration")
+ZERO_ALLOWED_MACHINE_FIELDS = ("accessoriesMass", "tipMass")
 
 
 @dataclass(frozen=True)

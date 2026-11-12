@@ -23,9 +23,11 @@ from app.domains.survey_data.survey_entities import (
 MACHINE_COLUMNS = {
     "hammerDropHeight": "hammer_drop_height",
     "hammerMass": "hammer_mass",
-    "anvilMass": "anvil_mass",
+    "accessoriesMass": "anvil_mass",
     "rodMass": "rod_mass",
+    "tipMass": "tip_mass",
     "tipSection": "tip_section",
+    "penetration": "penetration",
 }
 LEVEL_COLUMNS = [f"{level_id}_{column}" for level_id in LEVEL_IDS for column in ("depth", "ref")]
 

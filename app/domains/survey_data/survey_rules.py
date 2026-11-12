@@ -4,7 +4,7 @@
 from datetime import date
 
 from app.domains.survey_data.entities import level_completeness_errors, level_order_errors
-from app.domains.survey_data.survey_entities import HYDRO_MODES, SurveyData
+from app.domains.survey_data.survey_entities import HYDRO_MODES, ZERO_ALLOWED_MACHINE_FIELDS, SurveyData
 
 EM_MAX = 9999.99
 PRESSURE_MAX = 99.99
@@ -63,7 +63,11 @@ def penetrometer_errors(data: SurveyData, machine_type_ids: set[int]) -> list[st
     test = data.penetrometer
     if test is None:
         return []
-    errors = [f"Pénétromètre : {name} doit être strictement positif." for name, value in test.machine.items() if value is not None and value <= 0]
+    errors = [
+        f"Pénétromètre : {name} doit être positif ou nul." if name in ZERO_ALLOWED_MACHINE_FIELDS else f"Pénétromètre : {name} doit être strictement positif."
+        for name, value in test.machine.items()
+        if value is not None and (value < 0 if name in ZERO_ALLOWED_MACHINE_FIELDS else value <= 0)
+    ]
     if test.machine_type_id is not None and test.machine_type_id not in machine_type_ids:
         errors.append(f"Pénétromètre : type de machine inconnu ({test.machine_type_id}).")
     previous = None

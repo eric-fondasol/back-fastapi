@@ -38,12 +38,12 @@ def rows(engine):
 
 def test_lists_referentiels_standards_and_machine_types_in_order(client, site):
     with site.begin() as connection:
-        connection.execute(text("INSERT INTO penetrometer_machine_types (type, hammer_mass, hammer_drop_height, rod_mass, anvil_mass) VALUES ('PDB 64 kg', 64, 0.75, 6.3, 10)"))
+        connection.execute(text("INSERT INTO penetrometer_machine_types (type, hammer_mass, hammer_drop_height, rod_mass, anvil_mass, tip_section, penetration) VALUES ('PDB 64 kg', 64, 0.75, 6.3, 10, 20, 10)"))
 
     assert client.get("/referentiels").json() == [{"code": "NGF", "labelFr": "Nivellement", "labelEn": "Levelling"}, {"code": "LUREF", "labelFr": "Luref", "labelEn": None}]
     assert client.get("/standards").json() == [{"id": 1, "code": "DTU 14.1", "label": "Cuvelage"}, {"id": 2, "code": "Eurocode 7", "label": None}]
     [machine] = client.get("/penetrometer-machine-types").json()
-    assert machine == {"id": machine["id"], "type": "PDB 64 kg", "hammerMass": 64, "hammerDropHeight": 0.75, "rodMass": 6.3, "anvilMass": 10}
+    assert machine == {"id": machine["id"], "type": "PDB 64 kg", "hammerMass": 64, "hammerDropHeight": 0.75, "rodMass": 6.3, "accessoriesMass": 10, "tipMass": None, "tipSection": 20, "penetration": 10}
 
 
 def test_a_site_without_structures_returns_its_altitude(client, site):

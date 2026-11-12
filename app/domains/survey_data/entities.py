@@ -45,7 +45,10 @@ class PenetrometerMachineType:
     hammer_mass: float | None
     hammer_drop_height: float | None
     rod_mass: float | None
-    anvil_mass: float | None
+    accessories_mass: float | None
+    tip_mass: float | None
+    tip_section: float | None
+    penetration: float | None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -54,7 +57,10 @@ class PenetrometerMachineType:
             "hammerMass": self.hammer_mass,
             "hammerDropHeight": self.hammer_drop_height,
             "rodMass": self.rod_mass,
-            "anvilMass": self.anvil_mass,
+            "accessoriesMass": self.accessories_mass,
+            "tipMass": self.tip_mass,
+            "tipSection": self.tip_section,
+            "penetration": self.penetration,
         }
 
 

@@ -17,7 +17,10 @@ def standards(connection: Connection) -> list[Standard]:
 
 def penetrometer_machine_types(connection: Connection) -> list[PenetrometerMachineType]:
     rows = connection.execute(
-        text("SELECT id, type, hammer_mass, hammer_drop_height, rod_mass, anvil_mass FROM penetrometer_machine_types ORDER BY type")
+        text(
+            "SELECT id, type, hammer_mass, hammer_drop_height, rod_mass, anvil_mass, tip_mass, tip_section, penetration "
+            "FROM penetrometer_machine_types ORDER BY type"
+        )
     )
     return [
         PenetrometerMachineType(
@@ -26,7 +29,10 @@ def penetrometer_machine_types(connection: Connection) -> list[PenetrometerMachi
             hammer_mass=row.hammer_mass,
             hammer_drop_height=row.hammer_drop_height,
             rod_mass=row.rod_mass,
-            anvil_mass=row.anvil_mass,
+            accessories_mass=row.anvil_mass,
+            tip_mass=row.tip_mass,
+            tip_section=row.tip_section,
+            penetration=row.penetration,
         )
         for row in rows
     ]

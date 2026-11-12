@@ -40,6 +40,8 @@ def test_pressure_rules_and_complete_columns():
 def test_penetrometer_rules():
     reading = {"depth": 0.1, "blowCount": 5}
     assert errors(penetrometer={"machineTypeId": 7, "tipSection": 20, "readings": [reading, {"depth": 0.2, "blowCount": 6}]}) == []
+    assert errors(penetrometer={"accessoriesMass": 0, "tipMass": 0, "readings": [reading]}) == []
+    assert errors(penetrometer={"tipMass": -1, "readings": [reading]}) == ["Pénétromètre : tipMass doit être positif ou nul."]
     found = errors(penetrometer={"machineTypeId": 9, "rodMass": 0, "readings": [{"depth": 0.3, "blowCount": 2.5}, {"depth": 0.2, "qd": -1}, {"depth": 0.4}]})
     assert found[:2] == ["Pénétromètre : rodMass doit être strictement positif.", "Pénétromètre : type de machine inconnu (9)."]
     assert "Pénétromètre, 0.3 m : nombre de coups entier attendu." in found
