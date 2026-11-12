@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.body import json_object
 from app.core.profile import Profile, admin_profile
-from app.domains.admin import services
+from app.domains.admin import editing, services
 
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(admin_profile)])
 
@@ -87,7 +87,8 @@ def referentials() -> dict[str, Any]:
     return services.referentials()
 
 
-# Explorateur de la base, en lecture seule : tables du schéma public, puis une page de lignes.
+# Explorateur de la base : tables du schéma public, puis une page de lignes. Les tables de
+# editing.EDITABLE_TABLES acceptent en plus la création, la modification et la suppression de lignes.
 @router.get("/database/tables")
 def database_tables() -> list[dict[str, Any]]:
     return services.database_tables()
@@ -96,3 +97,29 @@ def database_tables() -> list[dict[str, Any]]:
 @router.get("/database/tables/{table}")
 def table_page(table: str, limit: str | None = Query(None), offset: str | None = Query(None)) -> dict[str, Any]:
     return services.table_page(table, limit, offset)
+
+
+@router.get("/database/tables/{table}/row")
+def table_row(table: str, key: str | None = Query(None)) -> dict[str, Any]:
+    return editing.row(table, key)
+
+
+@router.post("/database/tables/{table}/rows", status_code=201)
+def create_table_row(table: str, payload: dict = Depends(json_object), caller: Profile = Depends(admin_profile)) -> dict[str, Any]:
+    return editing.create_row(caller, table, payload)
+
+
+@router.patch("/database/tables/{table}/rows")
+def update_table_row(table: str, payload: dict = Depends(json_object), caller: Profile = Depends(admin_profile)) -> dict[str, Any]:
+    return editing.update_row(caller, table, payload)
+
+
+@router.get("/database/tables/{table}/deletion")
+def table_row_deletion(table: str, key: str | None = Query(None)) -> dict[str, Any]:
+    return editing.deletion_impact(table, key)
+
+
+@router.delete("/database/tables/{table}/rows", status_code=NO_CONTENT)
+def delete_table_row(table: str, key: str | None = Query(None)) -> Response:
+    editing.delete_row(table, key)
+    return Response(status_code=NO_CONTENT)

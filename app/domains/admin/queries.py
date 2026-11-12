@@ -277,7 +277,8 @@ def table_columns(connection: Connection, table: str) -> list[dict[str, Any]]:
         """
         SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, t.typname AS base_type,
                NOT a.attnotnull AS nullable,
-               EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.oid AND i.indisprimary AND a.attnum = ANY (i.indkey)) AS primary_key
+               EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.oid AND i.indisprimary AND a.attnum = ANY (i.indkey)) AS primary_key,
+               a.atthasdef AS has_default, a.attidentity <> '' AS identity, a.attgenerated <> '' AS generated
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -289,13 +290,13 @@ def table_columns(connection: Connection, table: str) -> list[dict[str, Any]]:
     )
 
 
-def _identifier(name: str) -> str:
+def identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
 # Chaque valeur est rendue en texte (géométries en WKT), coupée à max_length caractères.
 def _cell(column: dict[str, Any], max_length: int) -> str:
-    value = _identifier(column["name"])
+    value = identifier(column["name"])
     as_text = f"ST_AsText({value})" if column["base_type"] in ("geometry", "geography") else f"{value}::text"
     return f"CASE WHEN length({as_text}) > {max_length} THEN left({as_text}, {max_length}) || '…' ELSE {as_text} END"
 
@@ -306,10 +307,10 @@ def table_rows(
     connection: Connection, table: str, columns: list[dict[str, Any]], limit: int, offset: int, max_length: int, timeout_ms: int
 ) -> list[tuple[Any, ...]]:
     connection.execute(text(f"SET LOCAL statement_timeout = {int(timeout_ms)}"))
-    keys = [_identifier(column["name"]) for column in columns if column["primary_key"]]
+    keys = [identifier(column["name"]) for column in columns if column["primary_key"]]
     order = f" ORDER BY {', '.join(keys)}" if keys else ""
     cells = ", ".join(_cell(column, max_length) for column in columns)
-    sql = f"SELECT {cells} FROM public.{_identifier(table)}{order} LIMIT :limit OFFSET :offset"
+    sql = f"SELECT {cells} FROM public.{identifier(table)}{order} LIMIT :limit OFFSET :offset"
     return [tuple(row) for row in connection.execute(text(sql), {"limit": limit, "offset": offset})]
 
 

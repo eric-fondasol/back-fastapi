@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError
 from app.core.errors import Conflict, InvalidRequest, NotFound, Unprocessable
 from app.core.profile import ADMIN_ROLE, USER_ROLE, Profile
 from app.database.connection import refonte_transaction
-from app.domains.admin import queries
+from app.domains.admin import editing, queries
 
 CATEGORY_CODE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 LABEL_MAX_LENGTH = 200
@@ -310,7 +310,7 @@ def referentials() -> dict[str, Any]:
         }
 
 
-# --- Explorateur de la base, en lecture seule ----------------------------------------------------------
+# --- Explorateur de la base (l'édition des lignes est dans editing.py) ----------------------------------------------------------
 
 PAGE_SIZES = (25, 50, 100)
 MAX_OFFSET = 1_000_000
@@ -323,7 +323,13 @@ QUERY_CANCELED = "57014"
 def database_tables() -> list[dict[str, Any]]:
     with refonte_transaction() as connection:
         return [
-            {"name": row["name"], "estimatedRows": row["estimated_rows"], "sizeBytes": row["size_bytes"], "columns": row["columns"]}
+            {
+                "name": row["name"],
+                "estimatedRows": row["estimated_rows"],
+                "sizeBytes": row["size_bytes"],
+                "columns": row["columns"],
+                **editing.rights(row["name"]),
+            }
             for row in queries.database_tables(connection)
         ]
 
@@ -359,10 +365,8 @@ def table_page(table: str, limit: str | None, offset: str | None) -> dict[str, A
     return {
         "name": table,
         "estimatedRows": known[table]["estimated_rows"],
-        "columns": [
-            {"name": column["name"], "type": column["type"], "nullable": column["nullable"], "primaryKey": column["primary_key"]}
-            for column in columns
-        ],
+        **editing.rights(table),
+        "columns": [editing.column_json(column) for column in columns],
         "rows": [list(row) for row in rows[:page_size]],
         "offset": start,
         "limit": page_size,
