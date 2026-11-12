@@ -4,7 +4,10 @@ from urllib.parse import quote
 import pytest
 from sqlalchemy import text
 
-from tests.domains.admin.test_routes import AGENT, call, client, execute, make_admin  # noqa: F401
+from app.core.profile import Profile
+from app.core.errors import Conflict
+from app.domains.admin import editing
+from tests.domains.admin.test_routes import ADMIN, AGENT, OTHER_ADMIN, call, client, execute, make_admin, user_id  # noqa: F401
 
 
 def key(**values):
@@ -29,7 +32,7 @@ def test_the_table_list_tells_which_tables_can_be_edited_and_emptied(admin):
     assert (tables["users"]["editable"], tables["users"]["deletable"]) == (True, False)
     assert (tables["projects"]["editable"], tables["projects"]["deletable"]) == (True, False)
     assert (tables["parametrages"]["editable"], tables["parametrages"]["deletable"]) == (False, False)
-    assert tables["user_roles"]["editable"] is False
+    assert (tables["user_roles"]["editable"], tables["user_roles"]["deletable"]) == (True, True)
 
 
 def test_a_table_page_describes_which_columns_are_written_by_hand(admin):
@@ -186,3 +189,79 @@ def test_a_check_constraint_refusal_explains_itself(admin):
 
     assert response.status_code == 422
     assert "geolocation_reliabilities" in response.json()["errors"]
+
+
+def test_a_column_that_points_to_another_table_names_it_and_proposes_its_rows_by_label(admin, refonte_database):
+    execute(refonte_database, "INSERT INTO layer_categories (code, label_fr, position) VALUES ('geologie', 'Géologie', 1), ('eaux', 'Eaux', 2)")
+
+    columns = {column["name"]: column for column in call(admin, "GET", "/admin/database/tables/layer_categories").json()["columns"]}
+    choices = call(admin, "GET", "/admin/database/tables/layer_categories/columns/parent_id/choices").json()
+
+    assert (columns["parent_id"]["reference"], columns["code"]["reference"]) == ("layer_categories", None)
+    assert choices["table"] == "layer_categories"
+    assert choices["truncated"] is False
+    assert [choice["label"] for choice in choices["choices"]] == ["Eaux", "Géologie"]
+    assert {choice["value"] for choice in choices["choices"]} == set(
+        str(value) for value in [scalar(refonte_database, "SELECT id FROM layer_categories WHERE code = 'eaux'"), scalar(refonte_database, "SELECT id FROM layer_categories WHERE code = 'geologie'")]
+    )
+
+
+def test_the_rows_of_a_referenced_table_are_named_by_their_most_readable_column(admin):
+    roles = call(admin, "GET", "/admin/database/tables/user_roles/columns/role_code/choices").json()["choices"]
+    users = call(admin, "GET", "/admin/database/tables/user_roles/columns/user_id/choices").json()["choices"]
+
+    assert "admin" in {choice["value"] for choice in roles}
+    assert [choice["label"] for choice in users] == ["Admin Test"]
+    assert editing.label_column(["id", "code", "label_fr"], "id") == "label_fr"
+    assert editing.label_column(["id", "uuid"], "id") == "id"
+
+
+def test_choices_are_refused_for_a_column_without_link_or_an_unknown_table(admin):
+    assert call(admin, "GET", "/admin/database/tables/layer_categories/columns/code/choices").status_code == 404
+    assert call(admin, "GET", "/admin/database/tables/inconnue/columns/id/choices").status_code == 404
+
+
+def test_beyond_the_limit_the_choices_are_truncated(admin, monkeypatch):
+    monkeypatch.setattr("app.domains.admin.services.MAX_CHOICES", 0)
+
+    choices = call(admin, "GET", "/admin/database/tables/user_roles/columns/user_id/choices").json()
+
+    assert (choices["choices"], choices["truncated"]) == ([], True)
+
+
+def test_a_role_is_granted_then_withdrawn_through_the_user_roles_table(admin, refonte_database):
+    call(admin, "GET", "/me", identity=AGENT)
+    agent = user_id(admin, AGENT)
+
+    granted = call(admin, "POST", "/admin/database/tables/user_roles/rows", {"values": {"user_id": agent, "role_code": "admin"}})
+    assert granted.status_code == 201
+    assert scalar(refonte_database, "SELECT granted_at IS NOT NULL FROM user_roles WHERE user_id = :id AND role_code = 'admin'", id=agent)
+
+    withdrawn = call(admin, "DELETE", f"/admin/database/tables/user_roles/rows?key={key(user_id=agent, role_code='admin')}")
+    assert withdrawn.status_code == 204
+    assert call(admin, "GET", "/admin/database/tables", identity=AGENT).status_code == 403
+
+
+def test_an_admin_cannot_withdraw_their_own_admin_role(admin):
+    make_admin(admin, OTHER_ADMIN)
+
+    response = call(admin, "DELETE", f"/admin/database/tables/user_roles/rows?key={key(user_id=user_id(admin, ADMIN), role_code='admin')}")
+
+    assert response.status_code == 409
+    assert "propre rôle" in response.json()["errors"]
+
+
+def test_the_last_admin_cannot_be_withdrawn_by_a_caller_who_lost_the_role_meanwhile(admin):
+    call(admin, "GET", "/me", identity=AGENT)
+    former_admin = Profile(user_id(admin, AGENT), AGENT.azure_oid, AGENT.username, AGENT.name, roles=("user",))
+
+    with pytest.raises(Conflict, match="au moins un administrateur"):
+        editing.delete_row(former_admin, "user_roles", json.dumps({"user_id": user_id(admin, ADMIN), "role_code": "admin"}))
+
+
+def test_withdrawing_the_user_role_is_not_guarded(admin):
+    call(admin, "GET", "/me", identity=AGENT)
+
+    response = call(admin, "DELETE", f"/admin/database/tables/user_roles/rows?key={key(user_id=user_id(admin, AGENT), role_code='user')}")
+
+    assert response.status_code == 204

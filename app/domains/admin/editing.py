@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy.exc import DataError, IntegrityError, InternalError, OperationalError
 
 from app.core.errors import Conflict, InvalidRequest, NotFound, Unprocessable
-from app.core.profile import Profile
+from app.core.profile import ADMIN_ROLE, Profile
 from app.database.connection import refonte_transaction
 from app.domains.admin import editing_queries, queries
 
@@ -43,6 +43,7 @@ EDITABLE_TABLES: dict[str, bool] = {
     "saved_page_versions": True,
     "saved_pages": True,
     "standards": True,
+    "user_roles": True,
     "users": False,
     "waiting_images": True,
 }
@@ -70,7 +71,8 @@ def is_writable(column: dict[str, Any]) -> bool:
     return not column["identity"] and not column["generated"] and column["name"] not in MANAGED_COLUMNS
 
 
-def column_json(column: dict[str, Any]) -> dict[str, Any]:
+# reference : la table visée quand la colonne est une clé étrangère (le front propose alors ses lignes).
+def column_json(column: dict[str, Any], reference: dict[str, str] | None = None) -> dict[str, Any]:
     return {
         "name": column["name"],
         "type": column["type"],
@@ -78,7 +80,16 @@ def column_json(column: dict[str, Any]) -> dict[str, Any]:
         "primaryKey": column["primary_key"],
         "writable": is_writable(column),
         "hasDefault": column["has_default"] or column["identity"],
+        "reference": None if reference is None else reference["table"],
     }
+
+
+# Colonnes qui nomment une ligne, par préférence : libellé, nom, numéro d'affaire, adresse, code.
+LABEL_COLUMNS = ("label_fr", "libelle", "label", "display_name", "name", "project_number", "email", "code", "reference", "type")
+
+
+def label_column(columns: list[str], key_column: str) -> str:
+    return next((name for name in LABEL_COLUMNS if name in columns), key_column)
 
 
 def _sqlstate(error: Exception) -> str | None:
@@ -236,9 +247,25 @@ def deletion_impact(table: str, key: str | None) -> dict[str, Any]:
     return {kind: [{"table": name, "rows": rows} for name, rows in sorted(tables.items())] for kind, tables in found.items()}
 
 
-def delete_row(table: str, key: str | None) -> None:
+# Retirer un rôle admin (ligne de user_roles) : jamais le sien, jamais le dernier. Les autres colonnes de
+# user_roles forment la clé primaire, que la modification ne touche pas : seule la suppression est à garder.
+def _guard_admin_role(connection: Any, caller: Profile, table: str, key: dict[str, str]) -> None:
+    if table != "user_roles" or key.get("role_code") != ADMIN_ROLE:
+        return
+    admins = queries.locked_admin_ids(connection, ADMIN_ROLE)
+    if key.get("user_id") not in admins:
+        return
+    if key["user_id"] == caller.id:
+        raise Conflict("Vous ne pouvez pas retirer votre propre rôle administrateur.")
+    if len(admins) <= 1:
+        raise Conflict("Il doit rester au moins un administrateur.")
+
+
+def delete_row(caller: Profile, table: str, key: str | None) -> None:
     with _database_refusals(table), refonte_transaction() as connection:
         editing_queries.set_timeout(connection, WRITE_TIMEOUT_MS)
         columns = _deletable_columns(connection, table)
-        if editing_queries.delete(connection, table, columns, _key(key, columns)) == 0:
+        row_key = _key(key, columns)
+        _guard_admin_role(connection, caller, table, row_key)
+        if editing_queries.delete(connection, table, columns, row_key) == 0:
             raise NotFound(f"Ligne introuvable dans {table}.")

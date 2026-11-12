@@ -25,10 +25,6 @@ USER_SELECT = """
 """
 
 
-def users(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(connection, f"{USER_SELECT} ORDER BY users.display_name NULLS LAST, users.email")
-
-
 def user(connection: Connection, user_id: str) -> dict[str, Any] | None:
     rows = _rows(connection, f"{USER_SELECT} WHERE users.id = :id", id=user_id)
     return rows[0] if rows else None
@@ -131,125 +127,10 @@ def recent_address_searches(connection: Connection) -> list[dict[str, Any]]:
 # --- Business units et métiers -----------------------------------------------------------------------
 
 
-def business_units(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(
-        connection,
-        """
-        SELECT business_units.code, business_units.libelle, business_units.business_line, business_units.full_access,
-               count(users.id) AS users
-        FROM business_units LEFT JOIN users ON users.business_unit_code = business_units.code
-        GROUP BY business_units.code
-        ORDER BY business_units.code
-        """,
-    )
-
-
-def business_lines(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(connection, "SELECT code, label_fr, label_en, position FROM business_lines ORDER BY position, code")
-
-
-def update_business_line(connection: Connection, code: str, label_fr: str, label_en: str | None) -> bool:
-    result = connection.execute(
-        text("UPDATE business_lines SET label_fr = :fr, label_en = :en WHERE code = :code"),
-        {"code": code, "fr": label_fr, "en": label_en},
-    )
-    return result.rowcount == 1
-
-
 # --- Catégories et catalogue des couches -------------------------------------------------------------
 
 
-def layer_categories(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(
-        connection,
-        """
-        SELECT categories.code, categories.label_fr, categories.label_en, categories.position, count(layers.id) AS layers
-        FROM layer_categories categories LEFT JOIN catalog_layers layers ON layers.category_id = categories.id
-        GROUP BY categories.id
-        ORDER BY categories.position, categories.code
-        """,
-    )
-
-
-def layer_category(connection: Connection, code: str) -> dict[str, Any] | None:
-    rows = [row for row in layer_categories(connection) if row["code"] == code]
-    return rows[0] if rows else None
-
-
-def create_layer_category(connection: Connection, code: str, label_fr: str, label_en: str | None, by: str) -> None:
-    connection.execute(
-        text(
-            """
-            INSERT INTO layer_categories (code, label_fr, label_en, position, updated_by)
-            VALUES (:code, :fr, :en, (SELECT coalesce(max(position), 0) + 1 FROM layer_categories), :by)
-            """
-        ),
-        {"code": code, "fr": label_fr, "en": label_en, "by": by},
-    )
-
-
-def update_layer_category(connection: Connection, code: str, label_fr: str, label_en: str | None, by: str) -> None:
-    connection.execute(
-        text("UPDATE layer_categories SET label_fr = :fr, label_en = :en, updated_at = now(), updated_by = :by WHERE code = :code"),
-        {"code": code, "fr": label_fr, "en": label_en, "by": by},
-    )
-
-
-def reorder_layer_categories(connection: Connection, codes: list[str], by: str) -> None:
-    for position, code in enumerate(codes, start=1):
-        connection.execute(
-            text("UPDATE layer_categories SET position = :position, updated_at = now(), updated_by = :by WHERE code = :code"),
-            {"code": code, "position": position, "by": by},
-        )
-
-
-def delete_layer_category(connection: Connection, code: str) -> None:
-    connection.execute(text("DELETE FROM layer_categories WHERE code = :code"), {"code": code})
-
-
-CATALOG_LAYER_SELECT = """
-    SELECT layers.code, categories.code AS category, layers.country, layers.label_fr, layers.label_en, layers.kind,
-           layers.url, layers.attribution, layers.min_zoom, layers.max_zoom, layers.enabled
-    FROM catalog_layers layers JOIN layer_categories categories ON categories.id = layers.category_id
-"""
-
-
-def catalog_layers(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(connection, f"{CATALOG_LAYER_SELECT} ORDER BY categories.position, categories.code, layers.position, layers.code")
-
-
-def catalog_layer(connection: Connection, code: str) -> dict[str, Any] | None:
-    rows = _rows(connection, f"{CATALOG_LAYER_SELECT} WHERE layers.code = :code", code=code)
-    return rows[0] if rows else None
-
-
-def update_catalog_layer(connection: Connection, code: str, category: str, enabled: bool, by: str) -> None:
-    connection.execute(
-        text(
-            """
-            UPDATE catalog_layers
-            SET category_id = (SELECT id FROM layer_categories WHERE code = :category),
-                enabled = :enabled, updated_at = now(), updated_by = :by
-            WHERE code = :code
-            """
-        ),
-        {"code": code, "category": category, "enabled": enabled, "by": by},
-    )
-
-
 # --- Référentiels en lecture -------------------------------------------------------------------------
-
-
-def altimetric_references(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(connection, "SELECT code, label_fr, label_en FROM referentiels ORDER BY position, code")
-
-
-def no_docs_ged_reasons(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(connection, "SELECT id, libelle FROM no_docs_ged_reasons ORDER BY id")
-
-
-def geolocation_reliabilities(connection: Connection) -> list[dict[str, Any]]:
-    return _rows(connection, "SELECT scope, level, reliability, libelle FROM geolocation_reliabilities ORDER BY scope, level")
 
 
 # --- Explorateur de la base, en lecture seule ----------------------------------------------------------
@@ -292,6 +173,36 @@ def table_columns(connection: Connection, table: str) -> list[dict[str, Any]]:
 
 def identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
+
+
+# Clés étrangères d'une colonne de la table : colonne → table et colonne visées. Toutes celles de la base
+# portent sur une seule colonne ; une clé sur plusieurs colonnes serait ignorée (pas de liste de choix).
+def foreign_keys(connection: Connection, table: str) -> dict[str, dict[str, str]]:
+    rows = _rows(
+        connection,
+        """
+        SELECT child.attname AS name, target.relname AS target_table, parent.attname AS target_column
+        FROM pg_constraint c
+        JOIN pg_class source ON source.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = source.relnamespace
+        JOIN pg_class target ON target.oid = c.confrelid
+        JOIN pg_attribute child ON child.attrelid = c.conrelid AND child.attnum = c.conkey[1]
+        JOIN pg_attribute parent ON parent.attrelid = c.confrelid AND parent.attnum = c.confkey[1]
+        WHERE c.contype = 'f' AND n.nspname = 'public' AND source.relname = :table AND cardinality(c.conkey) = 1
+        """,
+        table=table,
+    )
+    return {row["name"]: {"table": row["target_table"], "column": row["target_column"]} for row in rows}
+
+
+# Valeur (en texte) et libellé des lignes d'une table visée par une clé étrangère, rangées par libellé.
+def reference_choices(connection: Connection, table: str, column: str, label: str, limit: int) -> list[tuple[str, str]]:
+    value, text_label = identifier(column), identifier(label)
+    sql = (
+        f"SELECT {value}::text, coalesce({text_label}::text, {value}::text) AS label FROM public.{identifier(table)} "
+        f"ORDER BY label, {value} LIMIT :limit"
+    )
+    return [(row[0], row[1]) for row in connection.execute(text(sql), {"limit": limit})]
 
 
 # Chaque valeur est rendue en texte (géométries en WKT), coupée à max_length caractères.
