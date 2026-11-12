@@ -41,6 +41,28 @@ docker exec -w /srv solscore_fastapi python -m app.domains.layer_catalog.imports
 docker exec -w /srv solscore_fastapi python -m app.domains.layer_catalog.imports legend <code> /tmp/import/<image>.png
 ```
 
+## Initialisation d'une base
+
+Les données ne sont pas dans la migration : sur une nouvelle base, la migration crée les tables et les
+fiches, puis les données se chargent une fois, à l'initialisation.
+
+Le 12/11/2026, la recette (serveur Windows, PostgreSQL installé sans Docker) a reçu un fichier SQL exporté
+de la base locale, passé à `psql`. HeidiSQL ne convient pas, il ne lit pas `COPY … FROM stdin`. Dans
+PowerShell, mettre `&` devant le chemin entre guillemets :
+
+```powershell
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -h localhost -U <utilisateur> -d <base> -f couches_canada.sql
+```
+
+Ce fichier retrouvait chaque couche par son code, puisque les identifiants diffèrent d'une base à l'autre.
+Il s'arrêtait si une couche manquait au catalogue. Le script qui l'a produit n'est pas conservé : c'était une
+opération unique.
+
+Piège rencontré : sur la base `fondasol` de recette, Alembic était en `0038` mais le catalogue était vide
+(aucune catégorie). La `0038` rattache ses couches à leur catégorie par leur code : sans catégorie, elle
+n'a rien inséré, sans erreur. Le catalogue a été rechargé à partir d'un export `pg_dump` de la base
+locale (`layer_categories`, `catalog_layers`), avant les données des couches.
+
 ## Préparer les fichiers
 
 L'image de l'API n'embarque pas GDAL. On utilise l'image officielle, sans rien installer :
