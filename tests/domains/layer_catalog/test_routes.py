@@ -59,8 +59,8 @@ def test_the_migration_seeds_the_six_layers_once_held_by_the_front(client, refon
     catalog = client.get(ROUTE).json()
 
     assert catalog["categories"] == [
-        {"code": "geologie", "label": {"fr": "Géologie", "en": "Geology"}},
-        {"code": "cadastre", "label": {"fr": "Cadastre et foncier", "en": "Cadastre and land"}},
+        {"code": "geologie", "label": {"fr": "Géologie", "en": "Geology"}, "parent": None},
+        {"code": "cadastre", "label": {"fr": "Cadastre et foncier", "en": "Cadastre and land"}, "parent": None},
     ]
     assert [(layer["code"], layer["category"], layer["country"]) for layer in catalog["layers"]] == [
         ("fr-geologie", "geologie", "fr"),

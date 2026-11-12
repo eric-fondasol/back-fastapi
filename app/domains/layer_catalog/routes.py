@@ -12,7 +12,7 @@ from app.domains.layer_catalog.sources import FeatureServiceUnavailable, TileNot
 router = APIRouter(tags=["Layer catalog"])
 
 
-# { "categories": [{ "code": "geologie", "label": { "fr": "Géologie", "en": "Geology" } }],
+# { "categories": [{ "code": "geologie", "label": { "fr": "Géologie", "en": "Geology" }, "parent": null }],
 #   "layers": [{ "code": "fr-geologie", "category": "geologie", "country": "fr", "label": {…}, "kind": "wms", … }] }
 @router.get("/layer-catalog")
 def layer_catalog() -> dict[str, Any]:

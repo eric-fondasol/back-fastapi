@@ -60,7 +60,9 @@ def catalog() -> dict[str, Any]:
 
     has_key = _private_api_key() is not None
     return {
-        "categories": [{"code": row["code"], "label": _localized(row["label_fr"], row["label_en"])} for row in categories],
+        "categories": [
+            {"code": row["code"], "label": _localized(row["label_fr"], row["label_en"]), "parent": row["parent"]} for row in categories
+        ],
         "layers": [_layer_json(row) for row in layers if has_key or not _needs_private_key(row)],
     }
 

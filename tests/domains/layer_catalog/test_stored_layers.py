@@ -223,3 +223,19 @@ def test_the_relayed_tiles_still_ask_their_service(client, database, monkeypatch
 
     assert client.get("/layer-catalog/ca-qc-mrnf-hydro-surfacique-lidar/tiles/15/9687/11720").status_code == 200
     assert calls == ["https://geoegl.msp.gouv.qc.ca/ws/mffpecofor.fcgi"]
+
+
+def test_the_water_categories_are_children_of_the_water_category(client, database):
+    with database.begin() as connection:
+        migration("0039_water_parent_category").seed(connection)
+
+    categories = client.get("/layer-catalog").json()["categories"]
+
+    parents = {category["code"]: category["parent"] for category in categories}
+    assert parents["eaux"] is None
+    assert (parents["eau-surface"], parents["eau-souterraine"]) == ("eaux", "eaux")
+    assert parents["geologie"] is None
+    water = next(category for category in categories if category["code"] == "eaux")
+    assert water["label"] == {"fr": "Eaux", "en": "Water"}
+    codes = [category["code"] for category in categories]
+    assert codes.index("eau-surface") < codes.index("eau-souterraine")

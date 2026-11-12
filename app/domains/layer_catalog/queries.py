@@ -6,8 +6,19 @@ from typing import Any
 from sqlalchemy import Connection, text
 
 
+# Catégories rangées comme dans le panneau, avec le code de leur catégorie parente (parent_id, migrations 0019
+# et 0039) : une sous-catégorie suit l'ordre des positions parmi les catégories de même parent.
 def categories(connection: Connection) -> list[dict[str, Any]]:
-    rows = connection.execute(text("SELECT code, label_fr, label_en FROM layer_categories ORDER BY position, code"))
+    rows = connection.execute(
+        text(
+            """
+            SELECT c.code, c.label_fr, c.label_en, p.code AS parent
+            FROM layer_categories c
+            LEFT JOIN layer_categories p ON p.id = c.parent_id
+            ORDER BY c.position, c.code
+            """
+        )
+    )
     return [dict(row) for row in rows.mappings()]
 
 
