@@ -40,7 +40,7 @@ def test_a_table_page_describes_which_columns_are_written_by_hand(admin):
     columns = {column["name"]: column for column in page["columns"]}
 
     assert (page["editable"], page["deletable"]) == (True, True)
-    assert (columns["id"]["writable"], columns["id"]["hasDefault"]) == (True, True)
+    assert (columns["id"]["writable"], columns["id"]["hasDefault"]) == (False, True)
     assert (columns["code"]["writable"], columns["code"]["hasDefault"]) == (True, False)
     assert columns["updated_at"]["writable"] is False
     assert columns["updated_by"]["writable"] is False
@@ -265,3 +265,17 @@ def test_withdrawing_the_user_role_is_not_guarded(admin):
     response = call(admin, "DELETE", f"/admin/database/tables/user_roles/rows?key={key(user_id=user_id(admin, AGENT), role_code='user')}")
 
     assert response.status_code == 204
+
+
+def test_a_generated_primary_key_is_never_written_by_hand(admin, refonte_database):
+    columns = {column["name"]: column for column in call(admin, "GET", "/admin/database/tables/layer_categories").json()["columns"]}
+    assert (columns["id"]["writable"], columns["code"]["writable"]) == (False, True)
+    roles = {column["name"]: column for column in call(admin, "GET", "/admin/database/tables/user_roles").json()["columns"]}
+    assert (roles["user_id"]["writable"], roles["role_code"]["writable"]) == (True, True)
+
+    forced = call(admin, "POST", "/admin/database/tables/layer_categories/rows", {"values": {"id": "00000000-0000-4000-8000-000000000000", "code": "x", "label_fr": "X", "position": "1"}})
+    created = call(admin, "POST", "/admin/database/tables/layer_categories/rows", {"values": {"code": "eaux", "label_fr": "Eaux", "position": "1"}})
+
+    assert forced.status_code == 400
+    assert created.status_code == 201
+    assert created.json()["key"]["id"] == str(scalar(refonte_database, "SELECT id FROM layer_categories WHERE code = 'eaux'"))

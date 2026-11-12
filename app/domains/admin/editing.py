@@ -67,8 +67,11 @@ def rights(table: str) -> dict[str, bool]:
     return {"editable": table in EDITABLE_TABLES, "deletable": EDITABLE_TABLES.get(table, False)}
 
 
+# Une clé primaire qui a une valeur par défaut (gen_random_uuid(), séquence) est générée par la base, jamais
+# saisie ; une clé naturelle sans valeur par défaut (code d'un métier, user_id et role_code) se saisit.
 def is_writable(column: dict[str, Any]) -> bool:
-    return not column["identity"] and not column["generated"] and column["name"] not in MANAGED_COLUMNS
+    generated_key = column["primary_key"] and column["has_default"]
+    return not column["identity"] and not column["generated"] and not generated_key and column["name"] not in MANAGED_COLUMNS
 
 
 # reference : la table visée quand la colonne est une clé étrangère (le front propose alors ses lignes).
