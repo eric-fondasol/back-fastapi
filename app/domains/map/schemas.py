@@ -29,11 +29,25 @@ class Position(BaseModel):
     lat: float = Field(ge=-90, le=90)
 
 
+SurveyKind = Literal["pressuremeter", "penetrometer", "lithology", "pzEquipment"]
+WaterLevelPresence = Literal["present", "absent"]
+SurveyOrigin = Literal["fondasol", "external"]
+
+
+# Filtres du panneau « Filtres » de la carte. Une liste vide ne filtre pas. Dans une section, les
+# valeurs se combinent en OU (pressiométrique ou pénétrométrique) ; entre sections, en ET.
+class SurveyFilters(BaseModel):
+    surveyKinds: list[SurveyKind] = []
+    waterLevels: list[WaterLevelPresence] = []
+    origins: list[SurveyOrigin] = []
+
+
 # Corps des requêtes de map.
 class AreaSearch(BaseModel):
     bounds: Bounds
     # Acceptée pour compatibilité avec le front, mais pas utilisée aujourd'hui.
     position: Optional[Position] = None
+    filters: SurveyFilters = SurveyFilters()
 
 
 # Description de la réponse GeoJSON, utilisée pour la documentation /docs.

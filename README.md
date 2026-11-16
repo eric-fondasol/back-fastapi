@@ -3,7 +3,8 @@
 Modèle d'API pour structurer apisolscore. Elle fournit au front Solscore :
 
 - les **sites** et les **sondages** à afficher sur la carte (`app/domains/map/`), lus
-  directement dans la base PostgreSQL d'apisolscore ;
+  sur l'API Solscore v2 (`solscore_apis`, routes `/general/…`) et renvoyés au front sous
+  son contrat habituel ;
 - les **données métier de la refonte** (profils, affaires, enquêtes), lues et écrites dans la
   base métier (`refonte_postgis` en local) : back-fastapi remplace le back Symfony, lot par
   lot (ADR-0034 du front). Faits : le socle (connexion, migrations Alembic, profil de
@@ -124,13 +125,14 @@ fichiers. Le dossier `tests/` reprend l'arborescence d'`app/`.
 | Fichier | Tests | Dépend de |
 |---|---|---|
 | `tests/core/test_auth.py` | 21 | rien |
-| `tests/core/test_audit.py` | 11 | la base d'apisolscore et la base métier de test (`usage_logs`) |
+| `tests/core/test_audit.py` | 11 | l'API Solscore v2 (`SOLSCORE_API_URL`) et la base métier de test (`usage_logs`) |
 | `tests/core/test_errors.py` | 6 | rien |
+| `tests/core/test_compression.py` | 3 | rien (API Solscore simulée) : gzip au-delà de 1 Ko si le client l'accepte, JSON brut sinon |
 | `tests/core/test_profile.py` | 7 | la base métier de test |
 | `tests/core/test_warmup.py` | 2 | la base d'apisolscore et la base métier |
 | `tests/domains/france/land_registry/test_services.py` | 4 | rien |
 | `tests/domains/france/land_registry/test_routes.py` | 9 | rien (IGN simulé) |
-| `tests/domains/map/test_routes.py` | 17 | la base d'apisolscore |
+| `tests/domains/map/test_routes.py` | 28 | rien (API Solscore simulée) |
 | `tests/domains/profile/test_entities.py` | 28 | rien |
 | `tests/domains/profile/test_routes.py` | 36 | la base métier de test |
 | `tests/domains/profile/test_sign_in.py` | 10 | la base métier de test (département Azure, business unit et métier) |
@@ -282,19 +284,33 @@ polluent ni `usage_logs` ni `logs/`. Les deux tests d'écriture réelle visent l
 Dans les autres tests, le préchauffage est désactivé (`tests/conftest.py`) pour ne pas
 appeler Azure.
 
-### `tests/domains/map/test_routes.py` — les routes de la carte (17 tests)
+### `tests/domains/map/test_routes.py` — les routes de la carte (28 tests)
 
-Ces tests interrogent **la vraie base d'apisolscore**, en lecture seule.
+L'API Solscore v2 est simulée (`httpx.MockTransport`) : ni réseau ni base.
 L'authentification y est remplacée par un utilisateur de test : elle est déjà couverte
 par le fichier précédent.
 
 | Test | Ce qu'il vérifie |
 |---|---|
-| `test_an_area_returns_a_geojson_collection_of_points_within_bounds` (×4) | sur un secteur de Paris, chaque route renvoie un GeoJSON bien formé, au moins un point, tous les points dans l'emprise demandée, des coordonnées à 6 décimales au plus, et exactement les propriétés attendues (aucune pour les routes simples ; `uuid`, `affaire_id`, `affaire_numero`, `affaire_nom` ou `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` pour les routes détaillées) |
-| `test_the_survey_kind_flags_are_always_booleans` (×3) | `has_mesure_pressiometrique`, `has_essai_penetro_dynamique` et `has_lithologie` valent toujours `true` ou `false`, jamais `null` |
-| `test_an_area_without_data_returns_an_empty_collection` (×4) | une zone en plein Atlantique renvoie une collection vide (200), pas une erreur |
-| `test_invalid_bounds_are_rejected` (×5) | refus (422) de latitudes inversées, de longitudes inversées, d'une latitude supérieure à 90, d'une longitude inférieure à -180, d'une emprise incomplète |
+| `test_sites_are_read_on_the_solscore_api_and_keep_the_front_contract` | `/searchSitesByAreaDetails` appelle `/general/searchSitesByAreaDetails` avec l'emprise, et renvoie `uuid`, `affaire_id`, `affaire_numero`, `affaire_nom` (renommés depuis `id`, `project_id`, `project_number`, `project_description`), coordonnées arrondies à 6 décimales |
+| `test_surveys_are_renamed_for_the_front_with_boolean_kind_flags` | `/searchSurveysByAreaDetails` renvoie `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` ; un indicateur `null` devient `false` |
+| `test_survey_positions_have_no_properties` | `/searchSurveysByArea` relaie `/general/searchSurveysByArea`, sans propriété |
+| `test_sites_without_details_come_from_the_detailed_route_without_properties` | `/searchSitesByArea` (absente de l'API Solscore) lit la route détaillée et ne renvoie aucune propriété |
+| `test_the_service_account_logs_in_once_then_reuses_its_token` | une seule connexion `POST /auth` (formulaire `username`, `password`) pour plusieurs recherches |
+| `test_an_expired_token_is_renewed_and_the_search_retried` | sur un 401, le jeton est redemandé et la recherche relancée une fois |
+| `test_an_area_without_data_returns_an_empty_collection` | une emprise sans point renvoie une collection vide (200) |
+| `test_a_failing_solscore_api_answers_502` (×4) | API injoignable, en erreur 500, réponse qui n'est pas du JSON ou pas une FeatureCollection : 502 « API Solscore injoignable » |
+| `test_refused_service_credentials_answer_502` | identifiants du compte de service refusés : 502 |
+| `test_without_solscore_api_configuration_the_map_answers_502` | sans `SOLSCORE_API_URL` : 502 |
+| `test_invalid_bounds_are_rejected_without_calling_the_solscore_api` (×5) | refus (422) de latitudes ou longitudes inversées, hors bornes, d'une emprise incomplète, sans appeler l'API Solscore |
 | `test_a_request_without_bounds_is_rejected` | une requête sans emprise est refusée (422) |
+| `test_one_kind_one_water_level_and_one_origin_are_all_required_by_the_solscore_api` | une nature, un niveau d'eau et une origine deviennent `has_lithology`, `has_water_levels`, `is_survey_fondasol` à `true` dans une seule demande |
+| `test_absent_water_levels_and_external_origin_ask_for_false_flags` | « Absents » et « Externes » demandent `has_water_levels` et `is_survey_fondasol` à `false` |
+| `test_both_values_of_a_section_do_not_filter` | les deux cases de Niveaux d'eau ou d'Origine n'ajoutent aucun indicateur |
+| `test_several_survey_kinds_keep_surveys_having_any_of_them` | plusieurs natures : une seule demande sans nature, sondages gardés s'ils ont l'une d'elles (OU) |
+| `test_several_survey_kinds_on_positions_read_the_details_and_return_no_properties` | même chose pour les positions seules, lues sur la route détaillée, renvoyées sans propriété |
+| `test_several_survey_kinds_on_sites_ask_each_kind_and_merge_the_sites` | en vue Sites, une demande par nature, sites réunis sans doublon dans l'ordre |
+| `test_unknown_filters_are_rejected_without_calling_the_solscore_api` (×3) | nature ou niveau d'eau inconnu, origine hors liste : 422 sans appel |
 
 ### Ce que les tests ne vérifient pas
 

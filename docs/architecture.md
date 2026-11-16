@@ -14,8 +14,8 @@ du code, la sécurité et les conventions.
 L'API rend deux types de services au front Solscore :
 
 - **les données internes de Fondasol** : les sites et les sondages à afficher sur la
-  carte, lus directement dans la base PostgreSQL d'apisolscore (`app/domains/map/`, déjà en
-  place) ;
+  carte, lus sur l'API Solscore v2 (`solscore_apis`, routes `/general/…`) et renvoyés au
+  front sous son contrat habituel (`app/domains/map/`) ;
 - **les données d'enquête par pays** : aléas naturels, géologie, environnement…,
   obtenues auprès de services publics (Géorisques, BRGM, données du Québec…). Leur
   structure est prête dans `app/domains/france/`, `app/domains/canada/` et `app/domains/luxembourg/` ; les routes
@@ -76,7 +76,7 @@ flowchart LR
 - Le front obtient un **id token** auprès d'Azure au moment de la connexion SSO, puis
   l'envoie à chaque appel dans l'en-tête `Authorization`.
 - Tous les domaines passent par la même vérification du jeton.
-- `map/` lit la base de Fondasol. Les domaines par pays interrogeront des services
+- `map/` lit les sites et sondages de Fondasol sur l'API Solscore v2. Les domaines par pays interrogeront des services
   publics ; les flèches en pointillé sont à venir.
 
 ---
@@ -113,8 +113,7 @@ back-fastapi/
 │       │   ├── routes.py                les URL : reçoit la requête, appelle le service, renvoie la réponse
 │       │   ├── schemas.py               le contrat de l'API : vérifie les entrées, décrit les sorties
 │       │   ├── services.py              le métier : récupère les données, applique les règles et calculs
-│       │   ├── entities.py              les objets métier manipulés par le service (ici, les points)
-│       │   └── queries.py               le SQL : lit la base de données
+│       │   └── sources.py               le service externe : l'API Solscore v2 (/general/…)
 │       ├── france/                      données d'enquête France          → /fr/…
 │       │   ├── routes.py                regroupe les thèmes de la France
 │       │   ├── natural_hazards/         aléas naturels                    → /fr/natural-hazards/…
@@ -270,11 +269,21 @@ destinée au front (`RiskResponse` dans `schemas.py`, par exemple seulement `lev
 En résumé : `entities.py` décrit **de quoi parle le métier**, `schemas.py` décrit **ce que
 l'API échange avec l'extérieur**.
 
-`map/` suit la même structure, sans `sources.py` puisque ses données viennent de la
-base. C'est l'exemple complet à suivre : `routes.py` appelle `services.py`, qui appelle
-`queries.py` et renvoie une entité `Points` (définie dans `entities.py`) ; la route la
-convertit en GeoJSON. Son service est simple, car la carte ne fait que lire et renvoyer ;
-c'est lui qui accueillera un éventuel regroupement des points ou un tri par proximité.
+`map/` suit la même structure, sans `queries.py` puisque ses données viennent de l'API
+Solscore v2 : `routes.py` appelle `services.py`, qui appelle `sources.py` (connexion du compte
+de service par `POST /auth`, jeton gardé et redemandé sur un 401) puis renomme les propriétés
+pour le front (`id` → `uuid`, `project_number` → `affaire_numero`, `name` → `nom`,
+`site_id` → `site_uuid`, `has_pressuremeter` → `has_mesure_pressiometrique`…) ; la route
+assemble le GeoJSON. L'API Solscore n'ayant pas de route des sites sans détails,
+`/searchSitesByArea` lit la route détaillée et renvoie les points sans propriété. API
+injoignable ou mal configurée : 502.
+
+Filtres du panneau de la carte (`filters` du corps : `surveyKinds`, `waterLevels`, `origins`) :
+OU dans une section, ET entre sections. L'API Solscore exigeant tous les indicateurs à la fois,
+une seule nature de sondage lui est passée telle quelle (`has_pressuremeter: true`…) ; plusieurs
+natures sont filtrées par `services.py` sur les sondages détaillés, ou demandées une à une puis
+réunies pour les sites. Une seule case de Niveaux d'eau ou d'Origine devient
+`has_water_levels` ou `is_survey_fondasol` ; les deux, ou aucune, ne filtrent pas.
 
 **Le sens des appels est toujours le même :**
 
@@ -364,8 +373,7 @@ flowchart TD
     lu --> luthemes["domains/luxembourg/geology<br/>routes.py"]
     map --> maps["domains/map/schemas.py"]
     map --> mapsv["domains/map/services.py"]
-    mapsv --> mapq["domains/map/queries.py"]
-    mapsv --> mape["domains/map/entities.py"]
+    mapsv --> mapq["domains/map/sources.py"]
     mapq --> db["database/connection.py"]
     health --> db
     auth --> config["core/config.py"]
@@ -392,8 +400,8 @@ sequenceDiagram
     participant A as core/auth.py
     participant R as domains/map/routes.py
     participant S as domains/map/services.py
-    participant Q as domains/map/queries.py
-    participant P as PostgreSQL apisolscore
+    participant Q as domains/map/sources.py
+    participant P as API Solscore v2
 
     F->>A: POST /searchSurveysByAreaDetails<br/>Authorization: Bearer (id token)
     alt jeton absent ou invalide
@@ -404,15 +412,18 @@ sequenceDiagram
         R-->>F: 422 avec le champ en cause
     end
     R->>S: surveys_in_area(bounds, with_details=True)
-    S->>Q: surveys_in_area(bounds, with_details=True)
-    Q->>P: SELECT … WHERE longitude BETWEEN … AND latitude BETWEEN …
-    P-->>Q: une ligne par sondage (position et propriétés)
-    Q-->>S: les colonnes et les lignes
-    S-->>R: une entité Points
+    S->>Q: area_features("/general/searchSurveysByAreaDetails", bounds)
+    Q->>P: POST /general/searchSurveysByAreaDetails<br/>Authorization: Bearer (jeton du compte de service)
+    P-->>Q: FeatureCollection (id, name, site_id, has_pressuremeter…)
+    Q-->>S: les points
+    S-->>R: les points, propriétés renommées pour le front
     R->>R: assemble le GeoJSON (orjson)
     R-->>F: 200 application/json
 ```
 
+0. **Compression** : `GZipMiddleware` (`main.py`) compresse les réponses de plus de 1 Ko quand
+   le client envoie `Accept-Encoding: gzip` (le serveur Next le fait), au niveau 5 ; images, zip,
+   tuiles vectorielles et PDF sont laissés tels quels.
 1. **CORS** : si l'appel vient d'un navigateur, l'origine du front doit être dans
    `CORS_ORIGINS`.
 2. **Authentification** : `core/auth.py` vérifie le jeton avant même que la route
@@ -481,44 +492,15 @@ Garde-fous :
 
 ## 6. Base de données
 
-| Table | Colonnes utilisées par `map/` |
-|---|---|
-| `public.site` | `uuid`, `latitude`, `longitude`, `affaire_id` |
-| `public.affaire` | `id`, `numero`, `nom` |
-| `public.sondage` | `id`, `nom`, `site_uuid`, `localisation_longitude_xwgs84`, `localisation_latitude_ywgs84`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` |
+Depuis le 13/11/2026, `map/` ne lit plus de table : les sites et sondages viennent de l'API
+Solscore v2 (`/general/searchSitesByAreaDetails`, `/general/searchSurveysByArea`,
+`/general/searchSurveysByAreaDetails`), qui lit `public.sites`, `public.surveys` et
+`public.projects` de la base v4. Les identifiants renvoyés au front sont donc ceux de la
+base v4 (site `IP.08.0106`, sondage `IP.04.0035_sc2`), les mêmes que ceux qu'attendent
+`/survey-data/{id}`, `/sites/{id}/…` et `/surveys/{id}` ; les UUID de l'entrepôt que
+renvoyait l'ancienne lecture SQL n'y étaient pas reconnus (404). Mesuré en local : 39 034
+sondages (Paris et petite couronne) en 0,8 s.
 
-- **La base renvoie des lignes simples, l'API assemble le GeoJSON.** Chaque requête
-  renvoie une ligne par point : `longitude`, `latitude` (déjà arrondies à 6 décimales),
-  puis les propriétés, dont les noms de colonnes sont ceux attendus dans le JSON
-  (`AS affaire_numero`…). Les requêtes sont construites par `points_sql()`
-  (`map/queries.py`). Le service les enveloppe dans une seule entité `Points` (noms des
-  propriétés et lignes), sans créer d'objet par point. `_geojson()` (`map/routes.py`)
-  les met ensuite au format GeoJSON avec
-  `orjson`, une bibliothèque de sérialisation JSON très rapide. Les lignes sont lues
-  telles quelles (des tuples) et associées aux noms des colonnes, sans être converties
-  une à une en dictionnaires.
-
-  Ce sont deux choix de performance mesurés sur 26 000 sondages, en alternant les appels
-  entre deux versions au même moment, pour un contenu identique :
-
-  | Version | Temps de réponse |
-  |---|---|
-  | JSON construit par PostgreSQL (`json_build_object`, `json_agg`) | 0,63 s |
-  | Lignes simples, converties en dictionnaires, JSON assemblé par l'API | 0,37 s |
-  | Lignes simples lues comme tuples, JSON assemblé par l'API (actuel) | **0,29 s** |
-
-  Construire le JSON dans PostgreSQL occupait un seul cœur de la base pendant environ
-  200 ms, et produisait un texte 10 % plus gros à faire transiter depuis la base distante.
-
-  **Contrainte à respecter** : dans `points_sql()`, `longitude` et `latitude` doivent
-  rester les deux premières colonnes. `_geojson()` s'appuie sur leur position.
-
-  Pour ajouter une propriété à une route, il suffit d'ajouter une colonne avec le bon nom
-  (`AS nom_dans_le_json`) dans `SITE_PROPERTIES` ou `SURVEY_PROPERTIES`.
-- **Le SQL est toujours paramétré** : les valeurs reçues du front passent par des
-  paramètres (`:minLng`, `:maxLat`…), jamais par concaténation. Les f-strings de
-  `queries.py` n'assemblent que des morceaux de SQL écrits dans le code. Aucune injection
-  SQL n'est possible.
 - **Pool de connexions** : la base est distante (environ 100 ms pour ouvrir une
   connexion). `database/connection.py` garde jusqu'à 5 connexions ouvertes (15 en pic) et
   les réutilise. Une connexion coupée est détectée et remplacée automatiquement.
@@ -860,6 +842,8 @@ démarrage**, avec un message qui nomme la variable en cause.
 | `FTP_HOST` · `FTP_PORT` (21) · `FTP_USERNAME` · `FTP_PASSWORD` · `FTP_BASE_PATH` | non | dépôt FTP des rapports archivés ; sans hôte, `/reports` répond 502 |
 | `GEORISQUES_BASE_URI` | non (`https://www.georisques.gouv.fr/api/v1`) | API publique Géorisques (planches) |
 | `PLANCHES_APISOLSCORE_BASE_URI` | non | ancien apisolscore, source des planches catnat, ppr, geol… ; sans elle, ces planches sont `unavailable` |
+| `SOLSCORE_API_URL` | non | API Solscore v2 (`http://host.docker.internal:8000` en local), source des sites et sondages de la carte ; sans elle, les quatre routes de la carte répondent 502 |
+| `SOLSCORE_API_USERNAME` · `SOLSCORE_API_PASSWORD` | non | compte de service de l'API Solscore v2 (`POST /auth`) ; mot de passe en clair, jamais envoyé au front |
 | `IGN_PRIVATE_API_KEY` | non | clé de la Géoplateforme pour ses services privés (SCAN 25), ajoutée aux tuiles relayées et jamais renvoyée au front ; sans elle, les couches `relayed` sortent du catalogue et leurs tuiles répondent 404 |
 | `NAV_ODATA_BASE_URI` | non | adresse OData V4 de Dynamics NAV jusqu'à la société (`https://nav.fondasol.fr:7048/FONDASOL_PROD_WS/ODataV4/Company('FONDASOL')`) ; sans elle, `/quotes/…` répond 502 |
 | `NAV_USERNAME` · `NAV_PASSWORD` | non | compte NAV (Basic Auth) de la recherche de devis ; jamais envoyé au front |

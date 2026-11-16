@@ -53,6 +53,13 @@ class Config(BaseSettings):
     georisques_base_uri: str = "https://www.georisques.gouv.fr/api/v1"
     planches_apisolscore_base_uri: str | None = None
 
+    # API Solscore v2 (solscore_apis, port 8000 en local) : sites et sondages de la carte
+    # (/general/searchSitesByAreaDetails…), avec un compte de service (POST /auth, OAuth2 password).
+    # Facultative : sans elle, l'API démarre et les routes de la carte répondent 502.
+    solscore_api_url: str | None = None
+    solscore_api_username: str | None = None
+    solscore_api_password: SecretStr | None = None
+
     # Clé d'API de la Géoplateforme pour ses services privés (SCAN 25). Jamais envoyée au navigateur :
     # le back relaie les tuiles (GET /layer-catalog/{code}/tiles/…). Facultative : sans elle, les
     # couches relayées disparaissent du catalogue et leurs tuiles répondent 404.
