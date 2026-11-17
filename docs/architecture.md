@@ -17,9 +17,12 @@ L'API rend deux types de services au front Solscore :
   carte, lus sur l'API Solscore v2 (`solscore_apis`, routes `/general/…`) et renvoyés au
   front sous son contrat habituel (`app/domains/map/`) ;
 - **les données d'enquête par pays** : aléas naturels, géologie, environnement…,
-  obtenues auprès de services publics (Géorisques, BRGM, données du Québec…). Leur
-  structure est prête dans `app/domains/france/`, `app/domains/canada/` et `app/domains/luxembourg/` ; les routes
-  restent à y ajouter.
+  obtenues auprès de services publics (Géorisques, BRGM, données du Québec…). Pour la
+  France, elles sont lues sur l'API Solscore v2 (routes `/fr/…` de `solscore_apis`) et
+  renvoyées telles quelles (`app/domains/france/`, ADR-0066 du front) ; le client de
+  l'API Solscore v2, avec son compte de service, est partagé dans `app/core/solscore_api.py`.
+  La structure du Canada et du Luxembourg est prête dans `app/domains/canada/` et
+  `app/domains/luxembourg/`.
 
 Chaque appel doit porter le jeton de l'utilisateur connecté au front par SSO (Azure AD).
 
@@ -603,6 +606,19 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /searchSurveysByArea` | les sondages de l'emprise, positions seules |
 | `POST /searchSurveysByAreaDetails` | les sondages, avec `id`, `nom`, `site_uuid`, `has_mesure_pressiometrique`, `has_essai_penetro_dynamique`, `has_lithologie` |
 | `POST /fr/land-registry/parcels` | une parcelle du cadastre français (GeoJSON), lue sur l'API Carto de l'IGN |
+| `POST /fr/natural-hazards` | les six aléas de l'API Solscore v2 (`/fr/alea/rga`, `sismique`, `radon`, `remontee_nappe`, `inondation`, `mouvement_terrain`) réunis en un objet (`alea_rga`, `alea_sismique`…, sans `mode_recherche`), demandés **l'un après l'autre**, les plus rapides d'abord : l'API Solscore traite une requête à la fois, et lancés ensemble les rapides dépassaient le délai de 30 s derrière les zones inondables (17/11/2026). Corps `{ lat, lon, parcelles?, code_insee? }` (point et/ou parcelles ; `code_insee` non transmis à inondation et mouvements de terrain) ; un aléa en échec est omis et journalisé ; 502 si aucun ne répond |
+| `POST /fr/natural-hazards/natural-disasters` · `/cavities` | arrêtés CatNat (`/fr/catnat`, `{ lat, lon, parcelles?, code_insee?, rayon_m }`) ; cavités (`/fr/cavites`, idem + `nb_cavites` ≤ 100) |
+| `POST /fr/geology/formations` | formation au droit du site et formations des cartes BRGM dans le rayon (`/fr/geologie`, `{ lat, lon, parcelles?, rayon_m }`) |
+| `POST /fr/hydrogeology/bss-works` · `/ades-works` · `/ades-chronicles` | ouvrages BSS (`/fr/hydrogeologie/points_bss`, `rayon_m`, `nb_bss` ≤ 100) ; stations ADES à environ 20 km (`points_ades`, `{ lat, lon, parcelles? }`) ; mesures d'une station (`chroniques_ades`, `{ code_bss, date_debut?, date_fin? }`, toute la chronique sans dates) |
+| `POST /fr/environment/pyrotechnics` · `/archaeological-excavations` | dommages de guerre 1914-1918 et 1939-1945 (`/fr/risque_pyrotechnique`, `{ lat, lon, parcelles? }`) ; fouilles de l'INRAP (`/fr/inrap`, `rayon_m`) |
+
+Routes `/fr/…` relayées vers l'API Solscore v2 (ci-dessus, sauf le cadastre) : corps contrôlé par
+`app/domains/france/schemas.py` (lat et lon ensemble, ou parcelles : 50 au plus, 3 à 5 000 sommets
+`[lon, lat]` ; rayon ≤ 20 000 m ; code INSEE à 5 caractères), 422 avant tout appel sinon ; champs absents
+non transmis ; réponse de l'API Solscore renvoyée **telle quelle** (contrat de `solscore_apis`, attendu par
+les mappers du front) ; 502 quand l'API Solscore est injoignable, en erreur, non configurée
+(`SOLSCORE_API_*`) ou répond autre chose qu'un objet JSON. Les thèmes n'ont que `routes.py`, `sources.py`
+et, s'il faut, `schemas.py` et `services.py` : un relais n'a ni entité ni calcul.
 | `POST /ca/land-registry/lots` | un lot du cadastre du Québec par son numéro (`{ "lot": "4019828" }`), GeoJSON avec `no_lot` et `area_m2` ; 404 introuvable, 502 service injoignable |
 | `POST /ca/land-registry/lots/at` | le lot qui contient un point cliqué (`{ "longitude", "latitude" }`, 422 hors du globe), pour la sélection de parcelles sur la carte : requête par point sur `Reference/Cadastre_allege/MapServer/0/query`, contour simplifié à 0,000005° ; `area_m2` calculée sur le contour (sphère de rayon WGS 84 ; 2 227,82 m² pour le lot 4 409 377, 2 227,95 au registre), le service ne publiant que `NO_LOT` ; 404 hors du cadastre rénové, 502 service injoignable |
 | `GET /me` | le profil de l'agent connecté (`id`, `email`, `displayName`, `department` : département Azure brut, `businessUnitCode` : business unit si le département en est une, `businessLine` : son métier), créé ou mis à jour |

@@ -7,7 +7,7 @@ from pydantic import SecretStr
 
 from app.core.auth import current_user
 from app.core.config import config
-from app.domains.map import sources
+from app.core import solscore_api as solscore_api_client
 from app.main import app
 
 PARIS = {"minLat": 48.84, "maxLat": 48.87, "minLng": 2.33, "maxLng": 2.37}
@@ -33,7 +33,7 @@ def solscore_api(monkeypatch):
     monkeypatch.setattr(config, "solscore_api_url", "http://solscore-api.test")
     monkeypatch.setattr(config, "solscore_api_username", "service")
     monkeypatch.setattr(config, "solscore_api_password", SecretStr("secret"))
-    monkeypatch.setattr(sources, "_token", None)
+    monkeypatch.setattr(solscore_api_client, "_token", None)
 
     def answer(count):
         def handler(request):
@@ -41,7 +41,7 @@ def solscore_api(monkeypatch):
                 return httpx.Response(200, json={"access_token": "token-1"})
             return httpx.Response(200, json={"type": "FeatureCollection", "features": [SURVEY] * count})
 
-        monkeypatch.setattr(sources, "transport", httpx.MockTransport(handler))
+        monkeypatch.setattr(solscore_api_client, "transport", httpx.MockTransport(handler))
 
     return answer
 

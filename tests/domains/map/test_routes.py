@@ -8,7 +8,7 @@ from pydantic import SecretStr
 
 from app.core.auth import current_user
 from app.core.config import config
-from app.domains.map import sources
+from app.core import solscore_api
 from app.main import app
 
 SOLSCORE_API = "http://solscore-api.test"
@@ -63,7 +63,7 @@ def solscore_api_configuration(monkeypatch):
     monkeypatch.setattr(config, "solscore_api_url", SOLSCORE_API)
     monkeypatch.setattr(config, "solscore_api_username", "service")
     monkeypatch.setattr(config, "solscore_api_password", SecretStr("secret"))
-    monkeypatch.setattr(sources, "_token", None)
+    monkeypatch.setattr(solscore_api, "_token", None)
 
 
 class SimulatedSolscoreApi:
@@ -84,7 +84,7 @@ class SimulatedSolscoreApi:
 
 
 def simulate(monkeypatch, handler):
-    monkeypatch.setattr(sources, "transport", httpx.MockTransport(handler))
+    monkeypatch.setattr(solscore_api, "transport", httpx.MockTransport(handler))
     return handler
 
 

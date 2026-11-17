@@ -54,8 +54,9 @@ class Config(BaseSettings):
     planches_apisolscore_base_uri: str | None = None
 
     # API Solscore v2 (solscore_apis, port 8000 en local) : sites et sondages de la carte
-    # (/general/searchSitesByAreaDetails…), avec un compte de service (POST /auth, OAuth2 password).
-    # Facultative : sans elle, l'API démarre et les routes de la carte répondent 502.
+    # (/general/searchSitesByAreaDetails…) et données d'enquête de la France (/fr/alea/…, /fr/catnat…),
+    # avec un compte de service (POST /auth, OAuth2 password ; client app/core/solscore_api.py).
+    # Facultative : sans elle, l'API démarre et ces routes répondent 502.
     solscore_api_url: str | None = None
     solscore_api_username: str | None = None
     solscore_api_password: SecretStr | None = None
