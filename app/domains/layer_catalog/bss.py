@@ -7,7 +7,8 @@
 # Remplace en une transaction tous les ouvrages : le relancer avec un nouvel extrait suffit. Le GeoPackage est lu
 # avec sqlite3 (pas de GDAL dans l'image) : une géométrie GeoPackage est un en-tête suivi d'un point en WKB.
 # Les colonnes copiées sont celles de bss_wells qui existent dans le fichier (même nom) ; la liste fait foi dans
-# la migration.
+# la migration. Le fichier est ouvert par une URI file:/// (Path.as_uri) : un chemin Windows (C:\apps\…) y est
+# converti, ce que ne fait pas une URI « file: » écrite à la main.
 
 import argparse
 import re
@@ -124,7 +125,7 @@ def _rows(database: sqlite3.Connection, columns: tuple[str, ...]) -> Iterator[We
 def open_source(path: Path, wanted: tuple[str, ...]) -> SourceFile:
     if not path.is_file():
         raise ImportRefused(f"Fichier introuvable : {path}")
-    database = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    database = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
     database.row_factory = sqlite3.Row
     found = [row["name"] for row in database.execute(f'PRAGMA table_info("{TABLE}")')]
     absent = [column for column in (*REQUIRED, GEOMETRY) if column not in found]
