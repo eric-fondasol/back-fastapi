@@ -57,15 +57,15 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
 
 
 # Couche activée dont le back sert les tuiles : WMTS ou WMS relayée (params.relayed, migrations 0010 et
-# 0036), ou tuiles stockées en base (database-tiles, migration 0038). None sinon.
+# 0036), tuiles stockées en base (database-tiles, migration 0038) ou ouvrages BSS (bss, migration 0047). None sinon.
 def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     row = connection.execute(
         text(
             """
-            SELECT id, code, kind, url, params
+            SELECT id, code, kind, url, params, min_zoom
             FROM catalog_layers
             WHERE code = :code AND enabled
-              AND (kind = 'database-tiles' OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
+              AND (kind IN ('database-tiles', 'bss') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
             """
         ),
         {"code": code},
@@ -121,3 +121,34 @@ def stored_legend(connection: Connection, code: str) -> tuple[bytes, str] | None
         {"code": code},
     ).first()
     return None if row is None else (bytes(row.content), row.content_type)
+
+
+MVT_EXTENT = 4096
+MVT_BUFFER = 64
+
+
+# Tuile vectorielle (MVT, couche « features ») des ouvrages BSS (table bss_wells, migration 0047) : ID_BSS,
+# url_fiche, code_log (classe de la légende) et les champs de la fiche au survol (côte du sol, profondeur atteinte,
+# niveau d'eau et sa date) ; b"" si aucun ouvrage ne touche la tuile. Les autres colonnes restent en base.
+def bss_tile(connection: Connection, z: int, x: int, y: int) -> bytes:
+    tile = connection.execute(
+        text(
+            f"""
+            WITH bounds AS (
+                SELECT ST_TileEnvelope(:z, :x, :y) AS box,
+                       ST_TileEnvelope(:z, :x, :y, margin => {MVT_BUFFER / MVT_EXTENT}) AS wide
+            )
+            SELECT ST_AsMVT(tile, 'features', {MVT_EXTENT}, 'geom')
+            FROM (
+                SELECT ST_AsMVTGeom(w.geometry, bounds.box, {MVT_EXTENT}, {MVT_BUFFER}, true) AS geom,
+                       w.bss_id AS "ID_BSS", w.sheet_url AS url_fiche, w.code_log,
+                       w.z_bdalti, w.prof_atteinte, w.prof_eau_sol, w.date_eau_sol
+                FROM bss_wells w, bounds
+                WHERE w.geometry && bounds.wide
+            ) tile
+            WHERE geom IS NOT NULL
+            """
+        ),
+        {"z": z, "x": x, "y": y},
+    ).scalar_one()
+    return bytes(tile or b"")

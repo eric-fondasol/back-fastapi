@@ -133,3 +133,29 @@ Une `rotation` dans le `LatLonBox` n'est pas reprise par `-a_ullr`. Elle est né
 Légendes : `Legende FR.png` (réduite à 600 px de large) pour les deux couches 1426, `Échelle de conversion.png`
 pour la 1427. Les fichiers KMZ viennent du dossier « Annexe 3 - Cartes mtl » transmis par le métier. Ils ne
 sont pas versionnés : pour réimporter, repartir de ce dossier.
+
+## Les ouvrages de la Banque du Sous-Sol (BSS)
+
+Couche `fr-brgm-bss-tous-ouvrages`, type `bss` (migration `0047`, ADR-0066 du front). Ses ouvrages ne sont pas dans
+`catalog_layer_features` mais dans une table dédiée, `bss_wells` : près d'un million de points, servis en tuiles
+vectorielles par `GET /layer-catalog/fr-brgm-bss-tous-ouvrages/tiles/{z}/{x}/{y}`.
+
+Source : `BSS_TOTAL.gpkg`, extrait de la BSS transmis par le métier (946 130 ouvrages, 1,3 Go, au 16/11/2026).
+Il n'est pas versionné. Toutes ses colonnes sont copiées, en texte, sous leur nom d'origine (liste dans la migration
+`0047`) ; une chaîne vide devient NULL. `bss_id`, `code_log` (classe de la légende, 1 à 6) et `lien` (formule Excel
+contenant l'adresse de la fiche InfoTerre) sont obligatoires ; l'import en tire `sheet_url` et le point en
+EPSG:3857. Les colonnes absentes d'un futur extrait restent vides, celles en trop sont ignorées : l'import liste
+les unes et les autres.
+
+```bash
+docker cp BSS_TOTAL.gpkg solscore_fastapi:/tmp/BSS_TOTAL.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.bss /tmp/BSS_TOTAL.gpkg
+docker exec solscore_fastapi rm /tmp/BSS_TOTAL.gpkg
+```
+
+L'import remplace tous les ouvrages en une transaction (2 min 20 pour l'extrait complet, 1,2 Go en base) et affiche le nombre
+d'ouvrages importés et écartés (sans géométrie, classe ou lien). Pour un nouvel extrait, relancer la même
+commande.
+
+Légende : dessinée par le front à partir des classes de la couche (`params.classes`, `params.symbol` à `point`),
+en ronds comme sur la carte ; aucune image à importer.

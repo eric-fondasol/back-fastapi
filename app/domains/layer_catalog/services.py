@@ -4,6 +4,8 @@
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import Connection
+
 from app.core.config import config
 from app.database.connection import refonte_transaction
 from app.domains.layer_catalog import queries, sources
@@ -71,15 +73,27 @@ class UnknownTileLayer(Exception):
     pass
 
 
-# Tuile d'une couche servie par le back : lue en base (database-tiles), WMTS demandée au service privé avec
+MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
+
+
+# En deçà du zoom minimal de la couche, la tuile est vide sans interroger la table : près d'un million de points.
+def _bss_tile(connection: Connection, layer: dict[str, Any], z: int, x: int, y: int) -> bytes:
+    min_zoom = _zoom(layer["min_zoom"])
+    return b"" if min_zoom is not None and z < min_zoom else queries.bss_tile(connection, z, x, y)
+
+
+# Tuile d'une couche servie par le back : lue en base (database-tiles, ou tuile vectorielle des ouvrages BSS), WMTS demandée au service privé avec
 # la clé, WMS demandée telle quelle. UnknownTileLayer si le code ne désigne pas une telle couche activée, ou
 # si la clé qu'il faut à une couche WMTS n'est pas configurée ; TileNotFound hors de la zone couverte.
 def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:
     with refonte_transaction() as connection:
         layer = queries.relayed_tile_layer(connection, code)
         stored = None if layer is None or layer["kind"] != "database-tiles" else queries.stored_tile(connection, layer["id"], z, x, y)
+        wells = None if layer is None or layer["kind"] != "bss" else _bss_tile(connection, layer, z, x, y)
     if layer is None:
         raise UnknownTileLayer(code)
+    if wells is not None:
+        return wells, MVT_MEDIA_TYPE
     if layer["kind"] == "database-tiles":
         if stored is None:
             raise sources.TileNotFound()
