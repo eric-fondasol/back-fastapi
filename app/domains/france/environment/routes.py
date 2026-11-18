@@ -1,9 +1,11 @@
-# Routes de l'environnement du site en France : /fr/environment/…, lues sur l'API Solscore v2.
+# Routes de l'environnement du site en France : /fr/environment/…, lues sur l'API Solscore v2, sauf les sites
+# CASIAS et BASOL, lus en base (sites.py).
 # Protégées par le jeton (le routeur France est branché avec dependencies=protected dans main.py).
 
 from fastapi import APIRouter
 
-from app.domains.france.environment import sources
+from app.database.connection import refonte_transaction
+from app.domains.france.environment import sites, sources
 from app.domains.france.relay import relayed
 from app.domains.france.schemas import PlaceSearch, RadiusSearch
 
@@ -22,8 +24,17 @@ def archaeological_excavations(search: RadiusSearch) -> dict:
     return relayed(lambda: sources.archaeological_excavations(search.body()))
 
 
-# Sites CASIAS (anciens sites industriels et activités de service) dans le rayon, triés par
-# distance (/fr/casias, extrait CASIAS.gpkg chargé par l'API Solscore v2).
+# Sites CASIAS (anciens sites industriels et activités de service) dans le rayon, triés par distance, lus dans la
+# table casias_sites, celle des couches CASIAS (voir sites.py).
 @router.post("/casias-sites")
 def casias_sites(search: RadiusSearch) -> dict:
-    return relayed(lambda: sources.casias_sites(search.body()))
+    with refonte_transaction() as connection:
+        return sites.sites_within(connection, sites.CASIAS, search)
+
+
+# Sites BASOL (pollution des sols appelant une action des pouvoirs publics) dans le rayon, triés par distance, lus
+# dans la table basol_sites, celle des couches BASOL (voir sites.py).
+@router.post("/basol-sites")
+def basol_sites(search: RadiusSearch) -> dict:
+    with refonte_transaction() as connection:
+        return sites.sites_within(connection, sites.BASOL, search)

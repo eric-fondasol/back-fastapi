@@ -74,8 +74,8 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
 
 # Couche activée dont le back sert les tuiles : WMTS ou WMS relayée (params.relayed, migrations 0010 et
 # 0036), tuiles stockées en base (database-tiles, migration 0038), ouvrages BSS (bss, migration 0047), sites
-# CASIAS (casias, migration 0048), milieux humides du Québec (wetlands, migration 0049) ou milieux humides
-# potentiels (potential-wetlands, migration 0050). None sinon.
+# CASIAS (casias, migration 0048), milieux humides du Québec (wetlands, migration 0049), milieux humides
+# potentiels (potential-wetlands, migration 0050) ou sites BASOL (basol, migration 0051). None sinon.
 def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     row = connection.execute(
         text(
@@ -83,7 +83,7 @@ def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | No
             SELECT id, code, kind, url, params, min_zoom
             FROM catalog_layers
             WHERE code = :code AND enabled
-              AND (kind IN ('database-tiles', 'bss', 'casias', 'wetlands', 'potential-wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
+              AND (kind IN ('database-tiles', 'bss', 'casias', 'basol', 'wetlands', 'potential-wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
             """
         ),
         {"code": code},
@@ -172,10 +172,10 @@ def bss_tile(connection: Connection, z: int, x: int, y: int) -> bytes:
     return bytes(tile or b"")
 
 
-# Tuile vectorielle (MVT, couche « features ») des sites CASIAS d'une forme (point ou polygon, table casias_sites,
-# migration 0048) : code, nom et adresse du site, état d'activité, inventaire et fiche Géorisques (url_fiche) ;
-# b"" si aucun site ne touche la tuile. Les autres colonnes restent en base.
-def casias_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> bytes:
+# Tuile vectorielle (MVT, couche « features ») des sites d'une table de sites (casias_sites ou basol_sites) d'une
+# forme (point ou polygon), avec les propriétés données (expressions SQL sur la table « s ») ; b"" si aucun site ne
+# touche la tuile.
+def _sites_tile(connection: Connection, table: str, properties: str, shape: str, z: int, x: int, y: int) -> bytes:
     tile = connection.execute(
         text(
             f"""
@@ -185,10 +185,8 @@ def casias_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> b
             )
             SELECT ST_AsMVT(tile, 'features', {MVT_EXTENT}, 'geom')
             FROM (
-                SELECT ST_AsMVTGeom(s.geometry, bounds.box, {MVT_EXTENT}, {MVT_BUFFER}, true) AS geom,
-                       s.code_metier, s.nom_etablissement, s.adresse, s.code_postal, s.nom_commune,
-                       s.etat_activite, s.nom_inventaire, s.code_siret, s.fiche_risque AS url_fiche
-                FROM casias_sites s, bounds
+                SELECT ST_AsMVTGeom(s.geometry, bounds.box, {MVT_EXTENT}, {MVT_BUFFER}, true) AS geom, {properties}
+                FROM {table} s, bounds
                 WHERE s.shape = :shape AND s.geometry && bounds.wide
             ) tile
             WHERE geom IS NOT NULL
@@ -197,6 +195,27 @@ def casias_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> b
         {"shape": shape, "z": z, "x": x, "y": y},
     ).scalar_one()
     return bytes(tile or b"")
+
+
+# Sites CASIAS (table casias_sites, migration 0048) : code, nom et adresse du site, état d'activité, inventaire et
+# fiche Géorisques (url_fiche). Les autres colonnes restent en base.
+def casias_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> bytes:
+    properties = (
+        "s.code_metier, s.nom_etablissement, s.adresse, s.code_postal, s.nom_commune, s.etat_activite, s.nom_inventaire, "
+        "s.code_siret, s.fiche_risque AS url_fiche"
+    )
+    return _sites_tile(connection, "casias_sites", properties, shape, z, x, y)
+
+
+# Sites BASOL (table basol_sites, migration 0051) : code, nom et adresse du site, statut de l'instruction, dates de
+# début, de fin et de mise à jour, fiche Géorisques (url_fiche). La description (jusqu'à 35 000 caractères) et les
+# autres colonnes restent en base : la fiche Géorisques les donne.
+def basol_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> bytes:
+    properties = (
+        "s.code_metier, s.nom_etablissement, s.adresse, s.code_postal, s.nom_commune, s.statut_instruction, "
+        "s.date_debut, s.date_fin, s.date_maj, s.url_fiche"
+    )
+    return _sites_tile(connection, "basol_sites", properties, shape, z, x, y)
 
 
 # Tuile vectorielle (MVT, couche « features ») des milieux humides du Québec (table quebec_wetlands, migration

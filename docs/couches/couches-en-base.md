@@ -185,6 +185,38 @@ commande.
 Légende : dessinée par le front à partir de `params.color` (rond pour les points, `params.symbol` à `point` ;
 carré pour les emprises) ; aucune image à importer.
 
+## Les sites BASOL (pollution des sols appelant une action des pouvoirs publics)
+
+Couches `fr-georisques-pollution-instruction-points` et `fr-georisques-pollution-instruction-polygones`, type
+`basol` (migration `0051`, ADR-0071 du front). Même modèle que CASIAS : table dédiée `basol_sites`, une ligne par
+site et par forme, servie en tuiles vectorielles par `GET /layer-catalog/<code>/tiles/{z}/{x}/{y}`. L'import est
+commun avec CASIAS (`site_layers.py`).
+
+Source : `BASOL.gpkg`, extrait transmis par le métier (tables `SSP_INSTR_GE_POINT`, 11 625 points, et
+`SSP_INSTR_GE_POLYGONE`, 7 650 emprises, au 17/11/2026). Il n'est pas versionné. Toutes ses colonnes sont copiées
+(liste dans la migration `0051`). Le fichier répète un site sur chacune de ses communes (même code, même
+géométrie) : l'import garde la première ligne du fichier, d'où 1 206 lignes écartées pour l'extrait complet.
+
+```bash
+docker cp BASOL.gpkg solscore_fastapi:/tmp/BASOL.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.basol /tmp/BASOL.gpkg
+docker exec solscore_fastapi rm /tmp/BASOL.gpkg
+```
+
+Sur le serveur Windows, avec le Python de l'environnement du back :
+
+```powershell
+python -m app.domains.layer_catalog.basol C:\apps\solscore\solscore_apis\database\basol\BASOL.gpkg
+```
+
+4 s en local, 58 Mo en base : 11 019 points et 7 050 emprises. Pour un nouvel extrait, relancer la même commande.
+
+Légende : dessinée par le front à partir de `params.color` (rouge `#d7301f`) ; aucune image à importer.
+
+La même table sert le tableau « Sites ex-BASOL » de l'enquête : `POST /fr/environment/basol-sites` (point ou
+parcelles, rayon), sans passer par l'API Solscore v2. De même, `casias_sites` sert le tableau « Sites CASIAS »
+(`POST /fr/environment/casias-sites`) : un seul import par fichier pour les couches et les tableaux.
+
 ## Les milieux humides du sud du Québec
 
 Couche `ca-qc-milieux-humides`, type `wetlands` (migration `0049`, ADR-0069 du front). Comme la BSS et CASIAS,

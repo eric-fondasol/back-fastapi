@@ -73,7 +73,6 @@ def simulate(monkeypatch, answers, failing=()):
         ("/fr/hydrogeology/ades-chronicles", {"code_bss": "06987A0186/S"}, "/fr/hydrogeologie/chroniques_ades"),
         ("/fr/environment/pyrotechnics", LYON, "/fr/risque_pyrotechnique"),
         ("/fr/environment/archaeological-excavations", {**LYON, "rayon_m": 2500}, "/fr/inrap"),
-        ("/fr/environment/casias-sites", {**LYON, "rayon_m": 200}, "/fr/casias"),
     ],
 )
 def test_each_route_relays_its_body_to_the_solscore_api_and_returns_the_answer_unchanged(client, monkeypatch, route, request_body, solscore_route):

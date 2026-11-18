@@ -1,0 +1,102 @@
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+from app.core import solscore_api
+from app.core.auth import current_user
+from app.main import app
+
+AVRIL = {"lat": 49.2668, "lon": 6.0206}
+ROUTE = "/fr/environment/basol-sites"
+CASIAS_ROUTE = "/fr/environment/casias-sites"
+
+
+def site(connection, shape, code, wkt, name="Crassiers", town="AVRIL"):
+    connection.execute(
+        text(
+            """
+            INSERT INTO basol_sites (shape, code_metier, nom_etablissement, nom_commune, statut_instruction, date_maj, url_fiche, geometry)
+            VALUES (:shape, :code, :name, :town, 'En cours', '2021-09-09', :fiche, ST_Transform(ST_GeomFromText(:wkt, 4326), 3857))
+            """
+        ),
+        {"shape": shape, "code": code, "name": name, "town": town, "fiche": f"https://fiches-risques.brgm.fr/georisques/infosols/instruction/{code}", "wkt": wkt},
+    )
+
+
+@pytest.fixture
+def client(refonte_database, monkeypatch):
+    def no_solscore_api(*args, **kwargs):
+        raise AssertionError("les sites CASIAS et BASOL sont lus en base, pas sur l'API Solscore v2")
+
+    monkeypatch.setattr(solscore_api, "post", no_solscore_api)
+    with refonte_database.begin() as connection:
+        site(connection, "point", "SSP000001", "POINT(6.0206 49.2668)")
+        site(connection, "polygon", "SSP000001", "MULTIPOLYGON(((6.0206 49.2668, 6.0216 49.2668, 6.0216 49.2678, 6.0206 49.2678, 6.0206 49.2668)))")
+        site(connection, "point", "SSP000002", "POINT(6.0206 49.2758)", name="Carreau de la mine", town="MOYEUVRE")
+        site(connection, "point", "SSP000003", "POINT(6.0206 49.3168)", name="Trop loin")
+        connection.execute(
+            text(
+                """
+                INSERT INTO casias_sites (shape, code_metier, nom_inventaire, code_inventaire, nom_etablissement, nom_commune, etat_activite, fiche_risque, geometry)
+                VALUES ('point', 'SSP4069681', 'BASIAS', 'LOR5703364', 'Garage du centre', 'AVRIL', 'En arrêt',
+                        'https://fiches-risques.brgm.fr/georisques/casias/SSP4069681', ST_Transform(ST_GeomFromText('POINT(6.0206 49.2708)', 4326), 3857))
+                """
+            )
+        )
+    app.dependency_overrides[current_user] = lambda: "test@fondasol.fr"
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
+
+
+def test_the_sites_within_the_radius_come_from_the_table_one_per_code_its_footprint_first_by_distance(client):
+    response = client.post(ROUTE, json={**AVRIL, "rayon_m": 2000})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["mode_recherche"], body["nombre_total"], body["rayon_recherche"]) == ("point", 2, 2000)
+    sites = [feature["properties"] for feature in body["data"]["features"]]
+    assert [(site["code_metier"], site["type_geometrie"], site["distance_m"]) for site in sites] == [("SSP000001", "polygone", 0), ("SSP000002", "point", 1001)]
+    assert sites[0]["url_fiche"] == "https://fiches-risques.brgm.fr/georisques/infosols/instruction/SSP000001"
+    assert (sites[1]["nom_etablissement"], sites[1]["nom_commune"], sites[1]["statut_instruction"], sites[1]["date_maj"]) == (
+        "Carreau de la mine",
+        "MOYEUVRE",
+        "En cours",
+        "2021-09-09",
+    )
+    assert body["data"]["features"][1]["geometry"] == {"type": "Point", "coordinates": [6.0206, 49.2758]}
+
+
+def test_the_sites_are_searched_around_the_parcels(client):
+    parcel = [[6.0196, 49.2748], [6.0216, 49.2748], [6.0216, 49.2768], [6.0196, 49.2768]]
+
+    body = client.post(ROUTE, json={"parcelles": [parcel], "rayon_m": 100}).json()
+
+    assert body["mode_recherche"] == "parcelles"
+    assert [(feature["properties"]["code_metier"], feature["properties"]["distance_m"]) for feature in body["data"]["features"]] == [("SSP000002", 0)]
+
+
+def test_an_invalid_search_is_refused(client):
+    assert client.post(ROUTE, json={**AVRIL, "rayon_m": 50000}).status_code == 422
+
+
+def test_the_casias_sites_come_from_their_table_in_the_format_of_the_solscore_api(client):
+    body = client.post(CASIAS_ROUTE, json={**AVRIL, "rayon_m": 1000}).json()
+
+    assert (body["mode_recherche"], body["nombre_total"]) == ("point", 1)
+    assert body["data"]["features"][0]["properties"] == {
+        "code_metier": "SSP4069681",
+        "nom_inventaire": "BASIAS",
+        "code_inventaire": "LOR5703364",
+        "nom_etablissement": "Garage du centre",
+        "adresse": None,
+        "code_insee": None,
+        "nom_commune": "AVRIL",
+        "etat_activite": "En arrêt",
+        "nature_localisation": None,
+        "fiche_risque": "https://fiches-risques.brgm.fr/georisques/casias/SSP4069681",
+        "type_geometrie": "point",
+        "distance_m": 445,
+    }

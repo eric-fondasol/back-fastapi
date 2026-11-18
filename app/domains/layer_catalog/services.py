@@ -98,15 +98,21 @@ def _bss_tile(connection: Connection, layer: dict[str, Any], z: int, x: int, y: 
     return b"" if min_zoom is not None and z < min_zoom else queries.bss_tile(connection, z, x, y)
 
 
-CASIAS_SHAPES = {"fr-georisques-casias-points": "point", "fr-georisques-casias-polygones": "polygon"}
+SITE_SHAPES = {
+    "fr-georisques-casias-points": "point",
+    "fr-georisques-casias-polygones": "polygon",
+    "fr-georisques-pollution-instruction-points": "point",
+    "fr-georisques-pollution-instruction-polygones": "polygon",
+}
+SITE_TILES = {"casias": queries.casias_tile, "basol": queries.basol_tile}
 
 
-# En deçà du zoom minimal de la couche, ou pour une couche casias qui n'est ni les points ni les emprises, la tuile
-# est vide sans interroger la table.
-def _casias_tile(connection: Connection, layer: dict[str, Any], z: int, x: int, y: int) -> bytes:
+# En deçà du zoom minimal de la couche, ou pour une couche de sites (casias, basol) qui n'est ni les points ni les
+# emprises, la tuile est vide sans interroger la table.
+def _sites_tile(connection: Connection, layer: dict[str, Any], z: int, x: int, y: int) -> bytes:
     min_zoom = _zoom(layer["min_zoom"])
-    shape = CASIAS_SHAPES.get(layer["code"])
-    return b"" if shape is None or (min_zoom is not None and z < min_zoom) else queries.casias_tile(connection, shape, z, x, y)
+    shape = SITE_SHAPES.get(layer["code"])
+    return b"" if shape is None or (min_zoom is not None and z < min_zoom) else SITE_TILES[layer["kind"]](connection, shape, z, x, y)
 
 
 POLYGON_TILES = {"wetlands": queries.wetlands_tile, "potential-wetlands": queries.potential_wetlands_tile}
@@ -119,15 +125,16 @@ def _polygon_tile(connection: Connection, layer: dict[str, Any], z: int, x: int,
     return b"" if min_zoom is not None and z < min_zoom else POLYGON_TILES[layer["kind"]](connection, z, x, y)
 
 
-# Tuile d'une couche servie par le back : lue en base (database-tiles, ou tuile vectorielle des ouvrages BSS, des sites CASIAS ou des milieux humides du Québec, détaillés ou potentiels), WMTS demandée au service privé avec
-# la clé, WMS demandée telle quelle. UnknownTileLayer si le code ne désigne pas une telle couche activée, ou
+# Tuile d'une couche servie par le back : lue en base (database-tiles, ou tuile vectorielle des ouvrages BSS, des
+# sites CASIAS ou BASOL, ou des milieux humides du Québec, détaillés ou potentiels), WMTS demandée au service privé
+# avec la clé, WMS demandée telle quelle. UnknownTileLayer si le code ne désigne pas une telle couche activée, ou
 # si la clé qu'il faut à une couche WMTS n'est pas configurée ; TileNotFound hors de la zone couverte.
 def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:
     with refonte_transaction() as connection:
         layer = queries.relayed_tile_layer(connection, code)
         stored = None if layer is None or layer["kind"] != "database-tiles" else queries.stored_tile(connection, layer["id"], z, x, y)
         wells = None if layer is None or layer["kind"] != "bss" else _bss_tile(connection, layer, z, x, y)
-        sites = None if layer is None or layer["kind"] != "casias" else _casias_tile(connection, layer, z, x, y)
+        sites = None if layer is None or layer["kind"] not in SITE_TILES else _sites_tile(connection, layer, z, x, y)
         polygons = None if layer is None or layer["kind"] not in POLYGON_TILES else _polygon_tile(connection, layer, z, x, y)
     if layer is None:
         raise UnknownTileLayer(code)

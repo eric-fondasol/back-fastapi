@@ -2,8 +2,8 @@
 # migration 0049) et milieux humides potentiels (potential_wetlands.py, migration 0050). Chaque couche décrit sa
 # table, la table du fichier, sa clé, la projection du fichier et la table de ses classes (PolygonLayer).
 #
-# Comme pour CASIAS (casias.py), le GeoPackage est lu avec sqlite3 et sa géométrie confiée à PostGIS une fois
-# l'en-tête retiré. Les colonnes du fichier sont rapprochées de celles de la table sans tenir compte de la casse
+# Comme pour CASIAS et BASOL (site_layers.py), le GeoPackage est lu avec sqlite3 et sa géométrie confiée à
+# PostGIS une fois l'en-tête retiré. Les colonnes du fichier sont rapprochées de celles de la table sans tenir compte de la casse
 # (exports ArcGIS en majuscules). Toute géométrie passe par ST_CurveToLine : les fichiers ont des MULTISURFACE,
 # que ST_HasArc ne repère pas quand elles sont faites de polygones simples.
 #
@@ -22,7 +22,7 @@ from pathlib import Path
 from sqlalchemy import Connection, text
 
 from app.database.connection import refonte_transaction
-from app.domains.layer_catalog.casias import MAX_MERCATOR_LATITUDE, ImportRefused, wkb_of
+from app.domains.layer_catalog.site_layers import MAX_MERCATOR_LATITUDE, ImportRefused, wkb_of
 
 GEOMETRY = "geom"
 COMPUTED = ("geometry",)
