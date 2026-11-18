@@ -30,3 +30,7 @@ def natural_disasters(body: dict) -> Any:
 
 def cavities(body: dict) -> Any:
     return solscore_api.post("/fr/cavites", body)
+
+
+def risk_plans(body: dict) -> Any:
+    return solscore_api.post("/fr/ppr", body)
