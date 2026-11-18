@@ -20,7 +20,18 @@ def _localized(french: str | None, english: str | None) -> dict[str, str | None]
     return None if french is None else {"fr": french, "en": english}
 
 
-def _layer_json(row: dict[str, Any]) -> dict[str, Any]:
+WETLAND_CLASS_PROPERTY = "classe"
+
+
+# Les classes d'une couche wetlands sont dans leur table (quebec_wetland_classes), et non dans params : le front
+# les reçoit comme celles de la BSS, dans params.classes.
+def _params(row: dict[str, Any], wetland_classes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if row["kind"] != "wetlands" or not wetland_classes:
+        return row["params"]
+    return {**(row["params"] or {}), "classes": {"property": WETLAND_CLASS_PROPERTY, "values": wetland_classes}}
+
+
+def _layer_json(row: dict[str, Any], wetland_classes: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "code": row["code"],
         "category": row["category"],
@@ -29,7 +40,7 @@ def _layer_json(row: dict[str, Any]) -> dict[str, Any]:
         "description": _localized(row["description_fr"], row["description_en"]),
         "kind": row["kind"],
         "url": row["url"],
-        "params": row["params"],
+        "params": _params(row, wetland_classes),
         "attribution": row["attribution"],
         "legendUrl": row["legend_url"],
         "minZoom": _zoom(row["min_zoom"]),
@@ -59,13 +70,14 @@ def catalog() -> dict[str, Any]:
     with refonte_transaction() as connection:
         categories = queries.categories(connection)
         layers = queries.enabled_layers(connection)
+        wetland_classes = queries.wetland_classes(connection)
 
     has_key = _private_api_key() is not None
     return {
         "categories": [
             {"code": row["code"], "label": _localized(row["label_fr"], row["label_en"]), "parent": row["parent"]} for row in categories
         ],
-        "layers": [_layer_json(row) for row in layers if has_key or not _needs_private_key(row)],
+        "layers": [_layer_json(row, wetland_classes) for row in layers if has_key or not _needs_private_key(row)],
     }
 
 
@@ -93,7 +105,13 @@ def _casias_tile(connection: Connection, layer: dict[str, Any], z: int, x: int, 
     return b"" if shape is None or (min_zoom is not None and z < min_zoom) else queries.casias_tile(connection, shape, z, x, y)
 
 
-# Tuile d'une couche servie par le back : lue en base (database-tiles, ou tuile vectorielle des ouvrages BSS ou des sites CASIAS), WMTS demandée au service privé avec
+# En deçà du zoom minimal de la couche, la tuile est vide sans interroger la table : plus de 300 000 polygones.
+def _wetlands_tile(connection: Connection, layer: dict[str, Any], z: int, x: int, y: int) -> bytes:
+    min_zoom = _zoom(layer["min_zoom"])
+    return b"" if min_zoom is not None and z < min_zoom else queries.wetlands_tile(connection, z, x, y)
+
+
+# Tuile d'une couche servie par le back : lue en base (database-tiles, ou tuile vectorielle des ouvrages BSS, des sites CASIAS ou des milieux humides du Québec), WMTS demandée au service privé avec
 # la clé, WMS demandée telle quelle. UnknownTileLayer si le code ne désigne pas une telle couche activée, ou
 # si la clé qu'il faut à une couche WMTS n'est pas configurée ; TileNotFound hors de la zone couverte.
 def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:
@@ -102,12 +120,15 @@ def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:
         stored = None if layer is None or layer["kind"] != "database-tiles" else queries.stored_tile(connection, layer["id"], z, x, y)
         wells = None if layer is None or layer["kind"] != "bss" else _bss_tile(connection, layer, z, x, y)
         sites = None if layer is None or layer["kind"] != "casias" else _casias_tile(connection, layer, z, x, y)
+        wetlands = None if layer is None or layer["kind"] != "wetlands" else _wetlands_tile(connection, layer, z, x, y)
     if layer is None:
         raise UnknownTileLayer(code)
     if wells is not None:
         return wells, MVT_MEDIA_TYPE
     if sites is not None:
         return sites, MVT_MEDIA_TYPE
+    if wetlands is not None:
+        return wetlands, MVT_MEDIA_TYPE
     if layer["kind"] == "database-tiles":
         if stored is None:
             raise sources.TileNotFound()

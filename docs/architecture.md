@@ -613,6 +613,7 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /fr/hydrogeology/bss-works` · `/ades-works` · `/ades-chronicles` | ouvrages BSS (`/fr/hydrogeologie/points_bss`, `rayon_m`, `nb_bss` ≤ 100) ; stations ADES à environ 20 km (`points_ades`, `{ lat, lon, parcelles? }`) ; mesures d'une station (`chroniques_ades`, `{ code_bss, date_debut?, date_fin? }`, toute la chronique sans dates) |
 | `POST /fr/urban-planning/plu` | fichiers des documents d'urbanisme (PLU, PLUi, carte communale…) du Géoportail de l'urbanisme (`/fr/plu`, `{ lat, lon, parcelles?, rayon_m? }`, tampon de 1 à 1 000 m, 20 m par défaut côté API Solscore) ; réponse `{ mode_recherche, plu_documents: [{ id, name, doc_name, doc_title, url }] }`. Pas encore appelée par le front (18/11/2026) : l'affichage reste à définir |
 | `POST /fr/environment/pyrotechnics` · `/archaeological-excavations` | dommages de guerre 1914-1918 et 1939-1945 (`/fr/risque_pyrotechnique`, `{ lat, lon, parcelles? }`) ; fouilles de l'INRAP (`/fr/inrap`, `rayon_m`) |
+| `POST /fr/environment/casias-sites` | sites CASIAS dans le rayon, triés par distance (`/fr/casias`, `rayon_m` ; 503 de l'API Solscore v2 sans `database/casias/CASIAS.gpkg`, donc 502 ici) |
 
 Routes `/fr/…` relayées vers l'API Solscore v2 (ci-dessus, sauf le cadastre) : corps contrôlé par
 `app/domains/france/schemas.py` (lat et lon ensemble, ou parcelles : 50 au plus, 3 à 5 000 sommets

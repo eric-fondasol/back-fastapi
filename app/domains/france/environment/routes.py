@@ -20,3 +20,10 @@ def pyrotechnics(search: PlaceSearch) -> dict:
 @router.post("/archaeological-excavations")
 def archaeological_excavations(search: RadiusSearch) -> dict:
     return relayed(lambda: sources.archaeological_excavations(search.body()))
+
+
+# Sites CASIAS (anciens sites industriels et activités de service) dans le rayon, triés par
+# distance (/fr/casias, extrait CASIAS.gpkg chargé par l'API Solscore v2).
+@router.post("/casias-sites")
+def casias_sites(search: RadiusSearch) -> dict:
+    return relayed(lambda: sources.casias_sites(search.body()))

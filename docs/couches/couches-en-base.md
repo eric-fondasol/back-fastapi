@@ -184,3 +184,41 @@ commande.
 
 Légende : dessinée par le front à partir de `params.color` (rond pour les points, `params.symbol` à `point` ;
 carré pour les emprises) ; aucune image à importer.
+
+## Les milieux humides du sud du Québec
+
+Couche `ca-qc-milieux-humides`, type `wetlands` (migration `0049`, ADR-0069 du front). Comme la BSS et CASIAS,
+ses milieux sont dans une table dédiée, `quebec_wetlands`, une ligne par milieu (clé `globalid`), servis en tuiles
+vectorielles par `GET /layer-catalog/ca-qc-milieux-humides/tiles/{z}/{x}/{y}`, vides sous le zoom 12.
+
+Source : `mh_2023.gpkg`, transmis par le métier le 18/11/2026 avec son style `style_mh.sld` (table
+`milieux_humides_sudqc_nov2023`, 328 863 multipolygones, « Cartographie détaillée des milieux humides des secteurs
+habités du sud du Québec », Canards Illimités Canada et MELCCFP, version de novembre 2023). Il n'est pas versionné.
+Toutes ses colonnes sont copiées, en texte, sous leur nom passé en minuscules (liste dans la migration `0049`) ;
+une chaîne vide (ou faite d'espaces, insécables compris) devient NULL. `GLOBALID` et la géométrie sont
+obligatoires ; une clé en double garde la première ligne. Les `MULTISURFACE` deviennent des `MULTIPOLYGON`.
+
+```bash
+docker cp mh_2023.gpkg solscore_fastapi:/tmp/mh_2023.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.wetlands /tmp/mh_2023.gpkg
+docker exec solscore_fastapi rm /tmp/mh_2023.gpkg
+```
+
+L'import remplace tous les milieux en une transaction (2 min 35 s pour le fichier complet, 772 Mo en base) et
+affiche le nombre de milieux importés et de lignes écartées. Pour une nouvelle version, relancer la même commande,
+puis `VACUUM FULL quebec_wetlands` : le remplacement laisse les anciennes lignes mortes, et la table double de
+taille sinon (1,5 Go constaté en local).
+
+Style : table `quebec_wetland_classes` (code, couleur, libellés français et anglais, ordre de la légende), remplie
+par la migration `0049` d'après `style_mh.sld` ; `quebec_wetlands.classe` y renvoie par une clé étrangère.
+`GET /layer-catalog` en tire `params.classes` pour le front, qui dessine la carte et la légende (un carré par
+classe) ; aucune image à importer. Pour changer une couleur ou un libellé :
+
+```sql
+UPDATE quebec_wetland_classes SET color = '#2e9e00' WHERE code = 'ME';
+```
+
+L'opacité du remplissage (50 %) est dans `params.fillOpacity` de la couche, et non par classe.
+
+Une classe absente de la table écarte ses milieux à l'import, qui la signale : l'ajouter à la table (dans une
+migration) avant de réimporter.
