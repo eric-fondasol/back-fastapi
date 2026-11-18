@@ -159,3 +159,28 @@ commande.
 
 Légende : dessinée par le front à partir des classes de la couche (`params.classes`, `params.symbol` à `point`),
 en ronds comme sur la carte ; aucune image à importer.
+
+## Les sites CASIAS (anciens sites industriels et activités de service)
+
+Couches `fr-georisques-casias-points` et `fr-georisques-casias-polygones`, type `casias` (migration `0048`,
+ADR-0068 du front). Comme la BSS, leurs sites sont dans une table dédiée, `casias_sites`, une ligne par site et par
+forme (`shape` à `point` ou `polygon`), servis en tuiles vectorielles par
+`GET /layer-catalog/<code>/tiles/{z}/{x}/{y}` (chaque couche ne sert que sa forme).
+
+Source : `CASIAS.gpkg`, extrait transmis par le métier (tables `SSP_ETS_GE_POINT`, 253 733 points, et
+`SSP_ETS_GE_POLYGON`, 3 756 emprises, au 17/11/2026). Il n'est pas versionné. Toutes ses colonnes sont copiées, en
+texte, sous leur nom d'origine (liste dans la migration `0048`) ; une chaîne vide devient NULL. `code_metier` et la
+géométrie sont obligatoires ; un code en double dans une table garde la première ligne.
+
+```bash
+docker cp CASIAS.gpkg solscore_fastapi:/tmp/CASIAS.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.casias /tmp/CASIAS.gpkg
+docker exec solscore_fastapi rm /tmp/CASIAS.gpkg
+```
+
+L'import remplace tous les sites des deux formes en une transaction (9 s pour l'extrait complet, 123 Mo en base) et
+affiche le nombre de points et d'emprises importés, et de lignes écartées. Pour un nouvel extrait, relancer la même
+commande.
+
+Légende : dessinée par le front à partir de `params.color` (rond pour les points, `params.symbol` à `point` ;
+carré pour les emprises) ; aucune image à importer.

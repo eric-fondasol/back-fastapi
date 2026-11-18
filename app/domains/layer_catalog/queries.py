@@ -57,7 +57,8 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
 
 
 # Couche activée dont le back sert les tuiles : WMTS ou WMS relayée (params.relayed, migrations 0010 et
-# 0036), tuiles stockées en base (database-tiles, migration 0038) ou ouvrages BSS (bss, migration 0047). None sinon.
+# 0036), tuiles stockées en base (database-tiles, migration 0038), ouvrages BSS (bss, migration 0047) ou sites
+# CASIAS (casias, migration 0048). None sinon.
 def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     row = connection.execute(
         text(
@@ -65,7 +66,7 @@ def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | No
             SELECT id, code, kind, url, params, min_zoom
             FROM catalog_layers
             WHERE code = :code AND enabled
-              AND (kind IN ('database-tiles', 'bss') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
+              AND (kind IN ('database-tiles', 'bss', 'casias') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
             """
         ),
         {"code": code},
@@ -150,5 +151,32 @@ def bss_tile(connection: Connection, z: int, x: int, y: int) -> bytes:
             """
         ),
         {"z": z, "x": x, "y": y},
+    ).scalar_one()
+    return bytes(tile or b"")
+
+
+# Tuile vectorielle (MVT, couche « features ») des sites CASIAS d'une forme (point ou polygon, table casias_sites,
+# migration 0048) : code, nom et adresse du site, état d'activité, inventaire et fiche Géorisques (url_fiche) ;
+# b"" si aucun site ne touche la tuile. Les autres colonnes restent en base.
+def casias_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> bytes:
+    tile = connection.execute(
+        text(
+            f"""
+            WITH bounds AS (
+                SELECT ST_TileEnvelope(:z, :x, :y) AS box,
+                       ST_TileEnvelope(:z, :x, :y, margin => {MVT_BUFFER / MVT_EXTENT}) AS wide
+            )
+            SELECT ST_AsMVT(tile, 'features', {MVT_EXTENT}, 'geom')
+            FROM (
+                SELECT ST_AsMVTGeom(s.geometry, bounds.box, {MVT_EXTENT}, {MVT_BUFFER}, true) AS geom,
+                       s.code_metier, s.nom_etablissement, s.adresse, s.code_postal, s.nom_commune,
+                       s.etat_activite, s.nom_inventaire, s.code_siret, s.fiche_risque AS url_fiche
+                FROM casias_sites s, bounds
+                WHERE s.shape = :shape AND s.geometry && bounds.wide
+            ) tile
+            WHERE geom IS NOT NULL
+            """
+        ),
+        {"shape": shape, "z": z, "x": x, "y": y},
     ).scalar_one()
     return bytes(tile or b"")
