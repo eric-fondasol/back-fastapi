@@ -103,12 +103,13 @@ SITE_SHAPES = {
     "fr-georisques-casias-polygones": "polygon",
     "fr-georisques-pollution-instruction-points": "point",
     "fr-georisques-pollution-instruction-polygones": "polygon",
+    "fr-georisques-sis": "polygon",
 }
-SITE_TILES = {"casias": queries.casias_tile, "basol": queries.basol_tile}
+SITE_TILES = {"casias": queries.casias_tile, "basol": queries.basol_tile, "sis": queries.sis_tile}
 
 
-# En deçà du zoom minimal de la couche, ou pour une couche de sites (casias, basol) qui n'est ni les points ni les
-# emprises, la tuile est vide sans interroger la table.
+# En deçà du zoom minimal de la couche, ou pour une couche de sites (casias, basol, sis) qui n'est ni les points
+# ni les emprises, la tuile est vide sans interroger la table.
 def _sites_tile(connection: Connection, layer: dict[str, Any], z: int, x: int, y: int) -> bytes:
     min_zoom = _zoom(layer["min_zoom"])
     shape = SITE_SHAPES.get(layer["code"])
@@ -126,7 +127,7 @@ def _polygon_tile(connection: Connection, layer: dict[str, Any], z: int, x: int,
 
 
 # Tuile d'une couche servie par le back : lue en base (database-tiles, ou tuile vectorielle des ouvrages BSS, des
-# sites CASIAS ou BASOL, ou des milieux humides du Québec, détaillés ou potentiels), WMTS demandée au service privé
+# sites CASIAS ou BASOL, des secteurs SIS, ou des milieux humides du Québec, détaillés ou potentiels), WMTS demandée au service privé
 # avec la clé, WMS demandée telle quelle. UnknownTileLayer si le code ne désigne pas une telle couche activée, ou
 # si la clé qu'il faut à une couche WMTS n'est pas configurée ; TileNotFound hors de la zone couverte.
 def tile(code: str, z: int, x: int, y: int) -> tuple[bytes, str]:

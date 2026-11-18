@@ -1,8 +1,9 @@
 # Sites pollués dans le rayon d'un point ou de parcelles, lus dans les tables de sites du catalogue des couches :
-# casias_sites (migration 0048) et basol_sites (migration 0051), importées depuis CASIAS.gpkg et BASOL.gpkg par
-# app/domains/layer_catalog/casias.py et basol.py. Les tableaux de l'enquête lisent ainsi les mêmes sites que les
-# couches, sans l'API Solscore v2 : sa route /fr/basol ne rend ni le code SSP ni la fiche Géorisques, et ses deux
-# routes dépendent d'un second exemplaire des fichiers, chargé à son démarrage (ADR-0071 du front).
+# casias_sites (migration 0048), basol_sites (0051) et sis_sites (0052), importées depuis CASIAS.gpkg, BASOL.gpkg
+# et SIS.gpkg par app/domains/layer_catalog/casias.py, basol.py et sis.py. Les tableaux de l'enquête lisent ainsi
+# les mêmes sites que les couches, sans l'API Solscore v2 : sa route /fr/basol ne rend ni le code SSP ni la fiche
+# Géorisques, et ses routes dépendent d'un second exemplaire des fichiers, chargé à son démarrage (ADR-0071 et
+# ADR-0072 du front).
 #
 # Réponse au format de /fr/casias de l'API Solscore v2 : un site par code (son emprise s'il en a une, sinon son
 # point), trié par distance croissante ; distance_m est la distance au lieu, sur l'ellipsoïde, 0 si le site le
@@ -37,6 +38,14 @@ BASOL = SiteTable(
     properties=(
         "code_metier", "url_fiche", "nom_etablissement", "adresse", "code_postal", "nom_commune", "statut_instruction",
         "date_debut", "date_fin", "date_maj",
+    ),
+)
+
+SIS = SiteTable(
+    table="sis_sites",
+    properties=(
+        "code_metier", "url_fiche", "id_inventaire_classification", "nom_etablissement", "adresse", "code_postal",
+        "code_insee", "nom_commune", "date_ap",
     ),
 )
 

@@ -1,6 +1,7 @@
-# Import commun des couches de sites en base, lues dans un extrait GeoPackage de Géorisques à deux tables, les
-# points et les emprises : sites CASIAS (casias.py, migration 0048) et sites BASOL (basol.py, migration 0051).
-# Chaque couche décrit sa table et les tables du fichier par forme (SiteLayer).
+# Import commun des couches de sites en base, lues dans un extrait GeoPackage de Géorisques à une table par forme
+# (points, emprises) : sites CASIAS (casias.py, migration 0048), sites BASOL (basol.py, migration 0051) et
+# secteurs SIS (sis.py, migration 0052, emprises seules). Chaque couche décrit sa table et les tables du fichier
+# par forme (SiteLayer).
 #
 # Le GeoPackage est lu avec sqlite3 (pas de GDAL dans l'image) ; la géométrie, un en-tête GeoPackage suivi de WKB,
 # est confiée telle quelle à PostGIS une fois l'en-tête retiré. Les colonnes copiées sont celles de la table qui
@@ -22,6 +23,7 @@ GEOMETRY = "geom"
 REQUIRED = ("code_metier",)
 COMPUTED = ("shape", "geometry")
 IMPORT_TABLE = "sites_import"
+SHAPE_NAMES = {"point": "points", "polygon": "emprises"}
 
 # Octets d'enveloppe selon les bits 1 à 3 des drapeaux de l'en-tête GeoPackage (aucune, xy, xyz, xym, xyzm).
 ENVELOPE_SIZES = {0: 0, 1: 32, 2: 48, 3: 48, 4: 64}
@@ -199,10 +201,8 @@ def main(arguments: list[str], layer: SiteLayer, program: str) -> int:
     except ImportRefused as error:
         print(f"Import refusé : {error}", file=sys.stderr)
         return 1
-    print(
-        f"{layer.label} : {result.imported.get('point', 0)} points et {result.imported.get('polygon', 0)} emprises importés, "
-        f"{result.skipped} écartés (géométrie ou code manquant, ou code en double)"
-    )
+    counts = " et ".join(f"{result.imported.get(shape, 0)} {SHAPE_NAMES[shape]}" for shape in layer.shapes)
+    print(f"{layer.label} : {counts} importés, {result.skipped} écartés (géométrie ou code manquant, ou code en double)")
     for table in source.tables:
         if table.missing:
             print(f"{layer.shapes[table.shape]} : colonnes absentes du fichier, laissées vides : {', '.join(table.missing)}")

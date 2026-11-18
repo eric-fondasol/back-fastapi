@@ -9,6 +9,7 @@ from app.main import app
 AVRIL = {"lat": 49.2668, "lon": 6.0206}
 ROUTE = "/fr/environment/basol-sites"
 CASIAS_ROUTE = "/fr/environment/casias-sites"
+SIS_ROUTE = "/fr/environment/sis-sites"
 
 
 def site(connection, shape, code, wkt, name="Crassiers", town="AVRIL"):
@@ -26,7 +27,7 @@ def site(connection, shape, code, wkt, name="Crassiers", town="AVRIL"):
 @pytest.fixture
 def client(refonte_database, monkeypatch):
     def no_solscore_api(*args, **kwargs):
-        raise AssertionError("les sites CASIAS et BASOL sont lus en base, pas sur l'API Solscore v2")
+        raise AssertionError("les sites CASIAS, BASOL et SIS sont lus en base, pas sur l'API Solscore v2")
 
     monkeypatch.setattr(solscore_api, "post", no_solscore_api)
     with refonte_database.begin() as connection:
@@ -40,6 +41,16 @@ def client(refonte_database, monkeypatch):
                 INSERT INTO casias_sites (shape, code_metier, nom_inventaire, code_inventaire, nom_etablissement, nom_commune, etat_activite, fiche_risque, geometry)
                 VALUES ('point', 'SSP4069681', 'BASIAS', 'LOR5703364', 'Garage du centre', 'AVRIL', 'En arrêt',
                         'https://fiches-risques.brgm.fr/georisques/casias/SSP4069681', ST_Transform(ST_GeomFromText('POINT(6.0206 49.2708)', 4326), 3857))
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO sis_sites (shape, code_metier, id_inventaire_classification, nom_etablissement, code_insee, nom_commune, date_ap, url_fiche, geometry)
+                VALUES ('polygon', 'SSP00073030201', '57SIS00001', 'Ancienne cokerie', '57001', 'AVRIL', '2019-07-03',
+                        'https://fiches-risques.brgm.fr/georisques/infosols/classification/SSP00073030201',
+                        ST_Transform(ST_GeomFromText('MULTIPOLYGON(((6.0300 49.2668, 6.0310 49.2668, 6.0310 49.2678, 6.0300 49.2678, 6.0300 49.2668)))', 4326), 3857))
                 """
             )
         )
@@ -100,3 +111,19 @@ def test_the_casias_sites_come_from_their_table_in_the_format_of_the_solscore_ap
         "type_geometrie": "point",
         "distance_m": 445,
     }
+
+
+def test_the_sis_sectors_come_from_their_table(client):
+    body = client.post(SIS_ROUTE, json={**AVRIL, "rayon_m": 1000}).json()
+
+    assert body["nombre_total"] == 1
+    sector = body["data"]["features"][0]["properties"]
+    assert (sector["code_metier"], sector["id_inventaire_classification"], sector["code_insee"], sector["nom_commune"], sector["type_geometrie"]) == (
+        "SSP00073030201",
+        "57SIS00001",
+        "57001",
+        "AVRIL",
+        "polygone",
+    )
+    assert sector["url_fiche"] == "https://fiches-risques.brgm.fr/georisques/infosols/classification/SSP00073030201"
+    assert 600 < sector["distance_m"] < 750

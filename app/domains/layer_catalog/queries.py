@@ -75,7 +75,8 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
 # Couche activée dont le back sert les tuiles : WMTS ou WMS relayée (params.relayed, migrations 0010 et
 # 0036), tuiles stockées en base (database-tiles, migration 0038), ouvrages BSS (bss, migration 0047), sites
 # CASIAS (casias, migration 0048), milieux humides du Québec (wetlands, migration 0049), milieux humides
-# potentiels (potential-wetlands, migration 0050) ou sites BASOL (basol, migration 0051). None sinon.
+# potentiels (potential-wetlands, migration 0050), sites BASOL (basol, migration 0051) ou secteurs SIS (sis,
+# migration 0052). None sinon.
 def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     row = connection.execute(
         text(
@@ -83,7 +84,7 @@ def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | No
             SELECT id, code, kind, url, params, min_zoom
             FROM catalog_layers
             WHERE code = :code AND enabled
-              AND (kind IN ('database-tiles', 'bss', 'casias', 'basol', 'wetlands', 'potential-wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
+              AND (kind IN ('database-tiles', 'bss', 'casias', 'basol', 'sis', 'wetlands', 'potential-wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
             """
         ),
         {"code": code},
@@ -172,7 +173,7 @@ def bss_tile(connection: Connection, z: int, x: int, y: int) -> bytes:
     return bytes(tile or b"")
 
 
-# Tuile vectorielle (MVT, couche « features ») des sites d'une table de sites (casias_sites ou basol_sites) d'une
+# Tuile vectorielle (MVT, couche « features ») des sites d'une table de sites (casias, basol ou sis_sites) d'une
 # forme (point ou polygon), avec les propriétés données (expressions SQL sur la table « s ») ; b"" si aucun site ne
 # touche la tuile.
 def _sites_tile(connection: Connection, table: str, properties: str, shape: str, z: int, x: int, y: int) -> bytes:
@@ -216,6 +217,16 @@ def basol_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> by
         "s.date_debut, s.date_fin, s.date_maj, s.url_fiche"
     )
     return _sites_tile(connection, "basol_sites", properties, shape, z, x, y)
+
+
+# Secteurs SIS (table sis_sites, migration 0052) : code, nom et adresse du secteur, identifiant SIS, date de
+# l'arrêté préfectoral, fiche Géorisques (url_fiche). Les autres colonnes restent en base.
+def sis_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> bytes:
+    properties = (
+        "s.code_metier, s.nom_etablissement, s.adresse, s.code_postal, s.nom_commune, s.code_insee, "
+        "s.id_inventaire_classification, s.date_ap, s.url_fiche"
+    )
+    return _sites_tile(connection, "sis_sites", properties, shape, z, x, y)
 
 
 # Tuile vectorielle (MVT, couche « features ») des milieux humides du Québec (table quebec_wetlands, migration

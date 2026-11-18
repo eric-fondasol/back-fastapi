@@ -1,5 +1,5 @@
 # Routes de l'environnement du site en France : /fr/environment/…, lues sur l'API Solscore v2, sauf les sites
-# CASIAS et BASOL, lus en base (sites.py).
+# CASIAS, BASOL et SIS, lus en base (sites.py).
 # Protégées par le jeton (le routeur France est branché avec dependencies=protected dans main.py).
 
 from fastapi import APIRouter
@@ -38,3 +38,11 @@ def casias_sites(search: RadiusSearch) -> dict:
 def basol_sites(search: RadiusSearch) -> dict:
     with refonte_transaction() as connection:
         return sites.sites_within(connection, sites.BASOL, search)
+
+
+# Secteurs d'information sur les sols (SIS) dans le rayon, triés par distance, lus dans la table sis_sites, celle
+# de la couche SIS (voir sites.py).
+@router.post("/sis-sites")
+def sis_sites(search: RadiusSearch) -> dict:
+    with refonte_transaction() as connection:
+        return sites.sites_within(connection, sites.SIS, search)

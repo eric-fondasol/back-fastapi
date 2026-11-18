@@ -217,6 +217,31 @@ La même table sert le tableau « Sites ex-BASOL » de l'enquête : `POST /fr/en
 parcelles, rayon), sans passer par l'API Solscore v2. De même, `casias_sites` sert le tableau « Sites CASIAS »
 (`POST /fr/environment/casias-sites`) : un seul import par fichier pour les couches et les tableaux.
 
+## Les secteurs d'information sur les sols (SIS)
+
+Couche `fr-georisques-sis`, type `sis` (migration `0052`, ADR-0072 du front). Même modèle que BASOL : table dédiée
+`sis_sites` (emprises seules), servie en tuiles vectorielles et au tableau « Sites SIS » de l'enquête
+(`POST /fr/environment/sis-sites`). L'import est commun avec CASIAS et BASOL (`site_layers.py`).
+
+Source : `SIS.gpkg`, extrait transmis par le métier (table `SSP_CLASSIF_SIS_GE`, 6 006 emprises au 17/11/2026).
+Il n'est pas versionné. Un secteur répété sur plusieurs communes garde la première ligne du fichier, d'où 310
+lignes écartées pour l'extrait complet.
+
+```bash
+docker cp SIS.gpkg solscore_fastapi:/tmp/SIS.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.sis /tmp/SIS.gpkg
+docker exec solscore_fastapi rm /tmp/SIS.gpkg
+```
+
+Sur le serveur Windows, avec le Python de l'environnement du back :
+
+```powershell
+python -m app.domains.layer_catalog.sis C:\apps\solscore\solscore_apis\database\sis\SIS.gpkg
+```
+
+Quelques secondes, 7 Mo en base : 5 696 emprises. Légende : dessinée par le front à partir de `params.color`
+(violet `#7b3294`).
+
 ## Les milieux humides du sud du Québec
 
 Couche `ca-qc-milieux-humides`, type `wetlands` (migration `0049`, ADR-0069 du front). Comme la BSS et CASIAS,
