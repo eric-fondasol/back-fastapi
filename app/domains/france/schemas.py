@@ -10,17 +10,16 @@ from pydantic import BaseModel, Field, model_validator
 MAX_PARCELS = 50
 MAX_PARCEL_VERTICES = 5000
 MAX_RADIUS_METERS = 20000
+MAX_BUFFER_METERS = 1000
 
 Latitude = Annotated[float, Field(ge=-90, le=90)]
 Longitude = Annotated[float, Field(ge=-180, le=180)]
-# Sommet [longitude, latitude] en WGS 84.
 Vertex = Annotated[list[float], Field(min_length=2, max_length=2)]
 Outline = Annotated[list[Vertex], Field(min_length=3, max_length=MAX_PARCEL_VERTICES)]
 
 INSEE_CODE_PATTERN = r"^(\d{5}|2[AB]\d{3})$"
 
 
-# Lieu recherché : un point (lat et lon ensemble), des parcelles, ou les deux (422 sinon).
 class PlaceSearch(BaseModel):
     lat: Latitude | None = Field(default=None, examples=[45.7606])
     lon: Longitude | None = Field(default=None, examples=[4.859])
@@ -34,7 +33,6 @@ class PlaceSearch(BaseModel):
             raise ValueError("un point (lat, lon) ou des parcelles sont attendus")
         return self
 
-    # Corps transmis à l'API Solscore : sans les champs absents, que l'API remplacerait par null.
     def body(self) -> dict:
         return self.model_dump(exclude_none=True)
 
@@ -49,3 +47,7 @@ class RadiusSearch(PlaceSearch):
 
 class CommuneRadiusSearch(CommuneSearch):
     rayon_m: int = Field(ge=0, le=MAX_RADIUS_METERS, examples=[1000])
+
+
+class BufferSearch(PlaceSearch):
+    rayon_m: int | None = Field(default=None, ge=1, le=MAX_BUFFER_METERS, examples=[20])

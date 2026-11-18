@@ -65,6 +65,8 @@ def simulate(monkeypatch, answers, failing=()):
         ("/fr/natural-hazards/cavities", {**LYON, "rayon_m": 2000, "code_insee": "69383", "nb_cavites": 5}, "/fr/cavites"),
         ("/fr/natural-hazards/risk-plans", LYON, "/fr/ppr"),
         ("/fr/natural-hazards/risk-plans", {"parcelles": [PARCEL], "rayon_m": 50}, "/fr/ppr"),
+        ("/fr/urban-planning/plu", LYON, "/fr/plu"),
+        ("/fr/urban-planning/plu", {"parcelles": [PARCEL], "rayon_m": 50}, "/fr/plu"),
         ("/fr/geology/formations", {**LYON, "rayon_m": 100}, "/fr/geologie"),
         ("/fr/hydrogeology/bss-works", {**LYON, "rayon_m": 500, "nb_bss": 3}, "/fr/hydrogeologie/points_bss"),
         ("/fr/hydrogeology/ades-works", LYON, "/fr/hydrogeologie/points_ades"),
@@ -114,11 +116,13 @@ def test_an_invalid_request_is_refused_without_calling_the_solscore_api(client, 
     assert api.calls == []
 
 
-def test_a_risk_plan_buffer_beyond_what_the_solscore_api_accepts_is_refused(client, monkeypatch):
+@pytest.mark.parametrize("route", ["/fr/natural-hazards/risk-plans", "/fr/urban-planning/plu"])
+def test_a_buffer_beyond_what_the_solscore_api_accepts_is_refused(client, monkeypatch, route):
     api = simulate(monkeypatch, {})
 
-    assert client.post("/fr/natural-hazards/risk-plans", json={**LYON, "rayon_m": 1001}).status_code == 422
-    assert client.post("/fr/natural-hazards/risk-plans", json={**LYON, "rayon_m": 0}).status_code == 422
+    assert client.post(route, json={**LYON, "rayon_m": 1001}).status_code == 422
+    assert client.post(route, json={**LYON, "rayon_m": 0}).status_code == 422
+    assert client.post(route, json={"rayon_m": 50}).status_code == 422
     assert api.calls == []
 
 

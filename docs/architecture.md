@@ -127,7 +127,7 @@ back-fastapi/
 │       │   │   ├── sources.py           les appels aux services externes (Géorisques…)
 │       │   │   └── queries.py
 │       │   ├── geology/                 … et de même dans chaque thème
-│       │   ├── urban_planning/          PLU, PPR
+│       │   ├── urban_planning/          PLU
 │       │   ├── environment/             sites pollués, zones naturelles, CatNat, cavités…
 │       │   ├── hydrogeology/            BSS, ADES
 │       │   └── weather/
@@ -611,6 +611,7 @@ La documentation interactive de toutes les routes est disponible sur
 | `POST /fr/natural-hazards/risk-plans` | plans de prévention des risques, servitude PM1 du Géoportail de l'urbanisme (`/fr/ppr`, `{ lat, lon, parcelles?, rayon_m? }`, tampon de 1 à 1 000 m, 20 m par défaut côté API Solscore) ; réponse `{ mode_recherche, ppr_documents: [{ suptype, nom_ppr, fichier, url, zip_archive_complete }] }` |
 | `POST /fr/geology/formations` | formation au droit du site et formations des cartes BRGM dans le rayon (`/fr/geologie`, `{ lat, lon, parcelles?, rayon_m }`) |
 | `POST /fr/hydrogeology/bss-works` · `/ades-works` · `/ades-chronicles` | ouvrages BSS (`/fr/hydrogeologie/points_bss`, `rayon_m`, `nb_bss` ≤ 100) ; stations ADES à environ 20 km (`points_ades`, `{ lat, lon, parcelles? }`) ; mesures d'une station (`chroniques_ades`, `{ code_bss, date_debut?, date_fin? }`, toute la chronique sans dates) |
+| `POST /fr/urban-planning/plu` | fichiers des documents d'urbanisme (PLU, PLUi, carte communale…) du Géoportail de l'urbanisme (`/fr/plu`, `{ lat, lon, parcelles?, rayon_m? }`, tampon de 1 à 1 000 m, 20 m par défaut côté API Solscore) ; réponse `{ mode_recherche, plu_documents: [{ id, name, doc_name, doc_title, url }] }`. Pas encore appelée par le front (18/11/2026) : l'affichage reste à définir |
 | `POST /fr/environment/pyrotechnics` · `/archaeological-excavations` | dommages de guerre 1914-1918 et 1939-1945 (`/fr/risque_pyrotechnique`, `{ lat, lon, parcelles? }`) ; fouilles de l'INRAP (`/fr/inrap`, `rayon_m`) |
 
 Routes `/fr/…` relayées vers l'API Solscore v2 (ci-dessus, sauf le cadastre) : corps contrôlé par
