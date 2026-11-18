@@ -10,7 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.auth import current_user
-from app.domains.layer_catalog import sources, wetlands
+from app.domains.layer_catalog import polygon_layers, sources
+from app.domains.layer_catalog.wetlands import LAYER
 from app.main import app
 
 VERSIONS = Path(__file__).parents[3] / "migrations" / "versions"
@@ -87,7 +88,7 @@ def client(database, monkeypatch):
 
 def imported(database, path):
     with database.begin() as connection:
-        return wetlands.import_wetlands(connection, wetlands.open_source(path, wetlands.table_columns(connection)))
+        return polygon_layers.import_polygons(connection, polygon_layers.open_source(path, polygon_layers.table_columns(connection, LAYER), LAYER), LAYER)
 
 
 def laval_file(tmp_path):
@@ -106,8 +107,8 @@ def test_the_import_replaces_the_wetlands_and_skips_the_unusable_rows(database, 
         ],
     )
 
-    assert imported(database, path) == wetlands.ImportResult(imported=2, skipped=3)
-    assert imported(database, path) == wetlands.ImportResult(imported=2, skipped=3)
+    assert imported(database, path) == polygon_layers.ImportResult(imported=2, skipped=3)
+    assert imported(database, path) == polygon_layers.ImportResult(imported=2, skipped=3)
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -128,7 +129,7 @@ def test_a_wetland_of_a_class_missing_from_the_class_table_is_skipped_and_report
         [(square(*LAVAL), "{A1}", "MS", 1.0, 3, "Laval"), (square(*LAVAL), "{A2}", "ZZ", 1.0, 3, "Laval"), (square(*LAVAL), "{A3}", None, 1.0, 3, "Laval")],
     )
 
-    assert imported(database, path) == wetlands.ImportResult(imported=2, skipped=1, unknown_classes=("ZZ",))
+    assert imported(database, path) == polygon_layers.ImportResult(imported=2, skipped=1, unknown_classes=("ZZ",))
 
 
 def test_the_wetlands_table_refuses_a_class_missing_from_the_class_table(database):
@@ -147,7 +148,7 @@ def test_a_multisurface_without_arc_becomes_a_multipolygon(database, tmp_path):
 
 def test_the_uppercase_columns_of_the_file_are_matched_to_those_of_the_table(database, tmp_path):
     with database.connect() as connection:
-        found = wetlands.open_source(laval_file(tmp_path), wetlands.table_columns(connection))
+        found = polygon_layers.open_source(laval_file(tmp_path), polygon_layers.table_columns(connection, LAYER), LAYER)
 
     assert found.columns == ("globalid", "classe", "conf_class", "projet", "mh_ha")
     assert found.names == ("GLOBALID", "CLASSE", "CONF_CLASS", "PROJET", "MH_HA")
@@ -159,7 +160,7 @@ def test_a_file_without_the_wetlands_table_is_refused(database, tmp_path):
     path = tmp_path / "autre.gpkg"
     sqlite3.connect(path).execute("CREATE TABLE autre (fid INTEGER, geom BLOB)").connection.commit()
 
-    with pytest.raises(wetlands.ImportRefused, match="milieux_humides_sudqc_nov2023"):
+    with pytest.raises(polygon_layers.ImportRefused, match="milieux_humides_sudqc_nov2023"):
         imported(database, path)
 
 

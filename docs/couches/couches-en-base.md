@@ -205,9 +205,10 @@ docker exec solscore_fastapi rm /tmp/mh_2023.gpkg
 ```
 
 L'import remplace tous les milieux en une transaction (2 min 35 s pour le fichier complet, 772 Mo en base) et
-affiche le nombre de milieux importés et de lignes écartées. Pour une nouvelle version, relancer la même commande,
-puis `VACUUM FULL quebec_wetlands` : le remplacement laisse les anciennes lignes mortes, et la table double de
-taille sinon (1,5 Go constaté en local).
+affiche le nombre de milieux importés et de lignes écartées. Pour une nouvelle version, relancer la même commande.
+Le chargement est commun avec les milieux humides potentiels (`polygon_layers.py`) : la table est vidée par
+`TRUNCATE` (plus de lignes mortes, plus besoin de `VACUUM FULL`) et l'index spatial reconstruit après le
+chargement ; la table est verrouillée jusqu'à la fin, les tuiles de la couche attendent.
 
 Style : table `quebec_wetland_classes` (code, couleur, libellés français et anglais, ordre de la légende), remplie
 par la migration `0049` d'après `style_mh.sld` ; `quebec_wetlands.classe` y renvoie par une clé étrangère.
@@ -222,3 +223,38 @@ L'opacité du remplissage (50 %) est dans `params.fillOpacity` de la couche, et 
 
 Une classe absente de la table écarte ses milieux à l'import, qui la signale : l'ajouter à la table (dans une
 migration) avant de réimporter.
+
+## Les milieux humides potentiels du Québec
+
+Couche `ca-qc-milieux-humides-potentiels`, type `potential-wetlands` (migration `0050`, ADR-0070 du front).
+Milieux dans `quebec_potential_wetlands` (clé `objectid`), style dans `quebec_potential_wetland_classes` (clé : la
+valeur de `CLASSE` en clair ; remplissage `color`, contour `outline`, libellés, ordre), liées par une clé étrangère
+sur la classe. Tuiles vectorielles par `GET /layer-catalog/ca-qc-milieux-humides-potentiels/tiles/{z}/{x}/{y}`,
+vides sous le zoom 12.
+
+Source : `mh_potentiel_2023.gpkg`, transmis par le métier le 18/11/2026 avec `style.sld` (table `mh_potentiel_qc`,
+2 446 410 multipolygones en EPSG:32198, « Milieux humides potentiels 2019 », MELCC - DCE). Il n'est pas versionné.
+Tout le fichier est importé, y compris les sources `MH_DETAIL` (cartographie détaillée de 2019), qui recouvrent la
+couche précédente.
+
+```bash
+docker cp mh_potentiel_2023.gpkg solscore_fastapi:/tmp/mh_potentiel_2023.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.potential_wetlands /tmp/mh_potentiel_2023.gpkg
+docker exec solscore_fastapi rm /tmp/mh_potentiel_2023.gpkg
+```
+
+Sur le serveur Windows, avec le Python de l'environnement du back :
+
+```powershell
+python -m app.domains.layer_catalog.potential_wetlands C:\apps\solscore\solscore_apis\database\mh_potentiel_2023_gpkg\mh_potentiel_2023.gpkg
+```
+
+11 min 54 s en local pour le fichier complet, 6,2 Go en base ; prévoir de l'ordre de 6 Go de plus le temps de
+l'import (table temporaire). La table est verrouillée jusqu'à la fin : à lancer hors des heures d'usage. Le
+fichier `style.sld` n'est pas lu : son contenu est dans la migration `0050`. Pour changer une couleur ou un
+contour :
+
+```sql
+UPDATE quebec_potential_wetland_classes SET color = '#a3ff73', outline = '#70a800' WHERE code = 'Marécage';
+```
+

@@ -40,11 +40,20 @@ def enabled_layers(connection: Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows.mappings()]
 
 
-# Classes des milieux humides du Québec (table quebec_wetland_classes, migration 0049), dans l'ordre de la légende,
-# sous la forme de params.classes : valeur, couleur, libellés.
-def wetland_classes(connection: Connection) -> list[dict[str, Any]]:
-    rows = connection.execute(text("SELECT code, color, label_fr, label_en FROM quebec_wetland_classes ORDER BY position")).mappings()
-    return [{"value": row["code"], "color": row["color"], "label": {"fr": row["label_fr"], "en": row["label_en"]}} for row in rows]
+# Classes d'une couche dont le style est en table (quebec_wetland_classes, migration 0049 ;
+# quebec_potential_wetland_classes, migration 0050), dans l'ordre de la légende, sous la forme de params.classes :
+# valeur, couleur, contour s'il y en a un, libellés. table est une constante du back, jamais une saisie.
+def layer_classes(connection: Connection, table: str) -> list[dict[str, Any]]:
+    rows = connection.execute(text(f"SELECT code, color, outline, label_fr, label_en FROM {table} ORDER BY position")).mappings()
+    return [
+        {
+            "value": row["code"],
+            "color": row["color"],
+            **({} if row["outline"] is None else {"outline": row["outline"]}),
+            "label": {"fr": row["label_fr"], "en": row["label_en"]},
+        }
+        for row in rows
+    ]
 
 
 # Couche vectorielle activée (WFS, GeoJSON ou objets en base) : de quoi interroger son service ou sa table.
@@ -65,7 +74,8 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
 
 # Couche activée dont le back sert les tuiles : WMTS ou WMS relayée (params.relayed, migrations 0010 et
 # 0036), tuiles stockées en base (database-tiles, migration 0038), ouvrages BSS (bss, migration 0047), sites
-# CASIAS (casias, migration 0048) ou milieux humides du Québec (wetlands, migration 0049). None sinon.
+# CASIAS (casias, migration 0048), milieux humides du Québec (wetlands, migration 0049) ou milieux humides
+# potentiels (potential-wetlands, migration 0050). None sinon.
 def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     row = connection.execute(
         text(
@@ -73,7 +83,7 @@ def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | No
             SELECT id, code, kind, url, params, min_zoom
             FROM catalog_layers
             WHERE code = :code AND enabled
-              AND (kind IN ('database-tiles', 'bss', 'casias', 'wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
+              AND (kind IN ('database-tiles', 'bss', 'casias', 'wetlands', 'potential-wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
             """
         ),
         {"code": code},
@@ -207,6 +217,33 @@ def wetlands_tile(connection: Connection, z: int, x: int, y: int) -> bytes:
                        w.globalid, w.classe, w.mh_ha, w.conf_delim, w.conf_class, w.typ_valid,
                        w.pression_1, w.pression_2, w.pression_3, w.pr_impact, w.projet, w.annee_photo
                 FROM quebec_wetlands w, bounds
+                WHERE w.geometry && bounds.wide
+            ) tile
+            WHERE geom IS NOT NULL
+            """
+        ),
+        {"z": z, "x": x, "y": y},
+    ).scalar_one()
+    return bytes(tile or b"")
+
+
+# Tuile vectorielle (MVT, couche « features ») des milieux humides potentiels du Québec (table
+# quebec_potential_wetlands, migration 0050) : classe (couleur de la légende) et les champs de la fiche au clic ;
+# b"" si aucun milieu ne touche la tuile.
+def potential_wetlands_tile(connection: Connection, z: int, x: int, y: int) -> bytes:
+    tile = connection.execute(
+        text(
+            f"""
+            WITH bounds AS (
+                SELECT ST_TileEnvelope(:z, :x, :y) AS box,
+                       ST_TileEnvelope(:z, :x, :y, margin => {MVT_BUFFER / MVT_EXTENT}) AS wide
+            )
+            SELECT ST_AsMVT(tile, 'features', {MVT_EXTENT}, 'geom')
+            FROM (
+                SELECT ST_AsMVTGeom(w.geometry, bounds.box, {MVT_EXTENT}, {MVT_BUFFER}, true) AS geom,
+                       w.objectid, w.classe, w.type, w.physionomie, w.sys_trophique, w.particularite, w.confiance,
+                       w.source, w.superficie
+                FROM quebec_potential_wetlands w, bounds
                 WHERE w.geometry && bounds.wide
             ) tile
             WHERE geom IS NOT NULL
