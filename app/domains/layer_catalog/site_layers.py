@@ -1,7 +1,8 @@
 # Import commun des couches de sites en base, lues dans un extrait GeoPackage de Géorisques à une table par forme
-# (points, emprises) : sites CASIAS (casias.py, migration 0048), sites BASOL (basol.py, migration 0051) et
-# secteurs SIS (sis.py, migration 0052, emprises seules). Chaque couche décrit sa table et les tables du fichier
-# par forme (SiteLayer).
+# (points, emprises) : sites CASIAS (casias.py, migration 0048), sites BASOL (basol.py, migration 0051), secteurs
+# SIS (sis.py, migration 0052, emprises seules) et établissements pollueurs (polluting_facilities.py, migration
+# 0053, points seuls). Chaque couche décrit sa table, les tables du fichier par forme et la colonne qui identifie
+# un site (SiteLayer : code_metier, sauf pour les établissements pollueurs, qui n'en ont pas).
 #
 # Le GeoPackage est lu avec sqlite3 (pas de GDAL dans l'image) ; la géométrie, un en-tête GeoPackage suivi de WKB,
 # est confiée telle quelle à PostGIS une fois l'en-tête retiré. Les colonnes copiées sont celles de la table qui
@@ -20,7 +21,6 @@ from sqlalchemy import Connection, text
 from app.database.connection import refonte_transaction
 
 GEOMETRY = "geom"
-REQUIRED = ("code_metier",)
 COMPUTED = ("shape", "geometry")
 IMPORT_TABLE = "sites_import"
 SHAPE_NAMES = {"point": "points", "polygon": "emprises"}
@@ -42,6 +42,7 @@ class SiteLayer:
     table: str
     shapes: dict[str, str]
     label: str
+    key: str = "code_metier"
 
 
 def wkb_of(blob: bytes | None) -> bytes | None:
@@ -68,11 +69,11 @@ class Site:
     wkb: bytes
 
 
-def site_of(row: sqlite3.Row, columns: tuple[str, ...]) -> Site | None:
+def site_of(row: sqlite3.Row, columns: tuple[str, ...], key: str) -> Site | None:
     wkb = wkb_of(row[GEOMETRY])
     values = tuple(_text(row[column]) for column in columns)
     known = dict(zip(columns, values, strict=True))
-    if wkb is None or known["code_metier"] is None:
+    if wkb is None or known[key] is None:
         return None
     return Site(values, wkb)
 
@@ -113,7 +114,7 @@ def open_source(path: Path, wanted: tuple[str, ...], layer: SiteLayer) -> Source
         tables = []
         for shape, table in layer.shapes.items():
             found = [row["name"] for row in database.execute(f'PRAGMA table_info("{table}")')]
-            absent = [column for column in (*REQUIRED, GEOMETRY) if column not in found]
+            absent = [column for column in (layer.key, GEOMETRY) if column not in found]
             if absent:
                 raise ImportRefused(f"Table {table} absente ou sans les colonnes {', '.join(absent)}")
             columns = tuple(column for column in wanted if column in found)
@@ -130,7 +131,7 @@ def sites(path: Path, table: SourceTable, layer: SiteLayer) -> Iterator[Site | N
     try:
         selected = ", ".join(f'"{column}"' for column in (*table.columns, GEOMETRY))
         for row in database.execute(f'SELECT {selected} FROM "{layer.shapes[table.shape]}" ORDER BY fid'):
-            yield site_of(row, table.columns)
+            yield site_of(row, table.columns, layer.key)
     finally:
         database.close()
 
@@ -171,11 +172,11 @@ def import_sites(connection: Connection, source: SourceFile, layer: SiteLayer) -
             text(
                 f"""
                 INSERT INTO {layer.table} (shape, {quoted}, geometry)
-                SELECT DISTINCT ON (code_metier) :shape, {quoted}, ST_Transform(ST_SetSRID(geometry, 4326), 3857)
+                SELECT DISTINCT ON ("{layer.key}") :shape, {quoted}, ST_Transform(ST_SetSRID(geometry, 4326), 3857)
                 FROM (SELECT *, ST_Force2D(ST_GeomFromWKB(import_wkb)) AS geometry FROM {IMPORT_TABLE}) parsed
                 WHERE NOT ST_IsEmpty(geometry) AND ST_YMin(geometry) >= -:max AND ST_YMax(geometry) <= :max
                   AND ST_XMin(geometry) >= -180 AND ST_XMax(geometry) <= 180
-                ORDER BY code_metier, import_order
+                ORDER BY "{layer.key}", import_order
                 """
             ),
             {"shape": table.shape, "max": MAX_MERCATOR_LATITUDE},

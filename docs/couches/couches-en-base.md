@@ -242,6 +242,31 @@ python -m app.domains.layer_catalog.sis C:\apps\solscore\solscore_apis\database\
 Quelques secondes, 7 Mo en base : 5 696 emprises. Légende : dessinée par le front à partir de `params.color`
 (violet `#7b3294`).
 
+## Les établissements pollueurs (registre IREP)
+
+Couche `fr-georisques-etablissements-pollueurs`, type `polluting-facilities` (migration `0053`, ADR-0073 du
+front). Même modèle que SIS : table dédiée `polluting_facilities` (points seuls), servie en tuiles vectorielles.
+L'import est commun avec CASIAS, BASOL et SIS (`site_layers.py`) ; le fichier n'ayant pas de `code_metier`, un
+établissement est identifié par `identifiant` (identifiant IREP).
+
+Source : `ETABLISSEMENTS_POLLUEURS.gpkg`, extrait transmis par le métier (table `ETABLISSEMENTS_POLLUEURS`,
+23 197 points au 18/11/2026). Il n'est pas versionné.
+
+```bash
+docker cp ETABLISSEMENTS_POLLUEURS.gpkg solscore_fastapi:/tmp/ETABLISSEMENTS_POLLUEURS.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.polluting_facilities /tmp/ETABLISSEMENTS_POLLUEURS.gpkg
+docker exec solscore_fastapi rm /tmp/ETABLISSEMENTS_POLLUEURS.gpkg
+```
+
+Sur le serveur Windows, avec le Python de l'environnement du back :
+
+```powershell
+python -m app.domains.layer_catalog.polluting_facilities C:\apps\solscore\solscore_apis\database\etablissements_pollueurs\ETABLISSEMENTS_POLLUEURS.gpkg
+```
+
+Quelques secondes, 8 Mo en base : 23 197 points. Légende : dessinée par le front à partir de `params.color`
+(orange `#e08214`, rond cerné de sombre).
+
 ## Les milieux humides du sud du Québec
 
 Couche `ca-qc-milieux-humides`, type `wetlands` (migration `0049`, ADR-0069 du front). Comme la BSS et CASIAS,
