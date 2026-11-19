@@ -1,7 +1,7 @@
 # Import commun des couches de sites en base, lues dans un extrait GeoPackage de Géorisques à une table par forme
 # (points, emprises) : sites CASIAS (casias.py, migration 0048), sites BASOL (basol.py, migration 0051), secteurs
-# SIS (sis.py, migration 0052, emprises seules) et établissements pollueurs (polluting_facilities.py, migration
-# 0053, points seuls). Chaque couche décrit sa table, les tables du fichier par forme et la colonne qui identifie
+# SIS (sis.py, migration 0052, emprises seules), établissements pollueurs (polluting_facilities.py, migration
+# 0053, points seuls) et servitudes SUP (sup.py, migration 0054, emprises seules). Chaque couche décrit sa table, les tables du fichier par forme et la colonne qui identifie
 # un site (SiteLayer : code_metier, sauf pour les établissements pollueurs, qui n'en ont pas).
 #
 # Le GeoPackage est lu avec sqlite3 (pas de GDAL dans l'image) ; la géométrie, un en-tête GeoPackage suivi de WKB,
@@ -203,7 +203,7 @@ def main(arguments: list[str], layer: SiteLayer, program: str) -> int:
         print(f"Import refusé : {error}", file=sys.stderr)
         return 1
     counts = " et ".join(f"{result.imported.get(shape, 0)} {SHAPE_NAMES[shape]}" for shape in layer.shapes)
-    print(f"{layer.label} : {counts} importés, {result.skipped} écartés (géométrie ou code manquant, ou code en double)")
+    print(f"{layer.label} : import de {counts} ; {result.skipped} lignes écartées (géométrie ou code manquant, ou code en double)")
     for table in source.tables:
         if table.missing:
             print(f"{layer.shapes[table.shape]} : colonnes absentes du fichier, laissées vides : {', '.join(table.missing)}")

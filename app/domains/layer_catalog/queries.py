@@ -76,7 +76,8 @@ def feature_layer(connection: Connection, code: str) -> dict[str, Any] | None:
 # 0036), tuiles stockées en base (database-tiles, migration 0038), ouvrages BSS (bss, migration 0047), sites
 # CASIAS (casias, migration 0048), milieux humides du Québec (wetlands, migration 0049), milieux humides
 # potentiels (potential-wetlands, migration 0050), sites BASOL (basol, migration 0051), secteurs SIS (sis,
-# migration 0052) ou établissements pollueurs (polluting-facilities, migration 0053). None sinon.
+# migration 0052), établissements pollueurs (polluting-facilities, migration 0053) ou servitudes SUP (sup,
+# migration 0054). None sinon.
 def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | None:
     row = connection.execute(
         text(
@@ -84,7 +85,7 @@ def relayed_tile_layer(connection: Connection, code: str) -> dict[str, Any] | No
             SELECT id, code, kind, url, params, min_zoom
             FROM catalog_layers
             WHERE code = :code AND enabled
-              AND (kind IN ('database-tiles', 'bss', 'casias', 'basol', 'sis', 'polluting-facilities', 'wetlands', 'potential-wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
+              AND (kind IN ('database-tiles', 'bss', 'casias', 'basol', 'sis', 'polluting-facilities', 'sup', 'wetlands', 'potential-wetlands') OR (kind IN ('wmts', 'wms') AND (params ->> 'relayed')::boolean IS TRUE))
             """
         ),
         {"code": code},
@@ -173,8 +174,8 @@ def bss_tile(connection: Connection, z: int, x: int, y: int) -> bytes:
     return bytes(tile or b"")
 
 
-# Tuile vectorielle (MVT, couche « features ») des sites d'une table de sites (casias, basol, sis_sites ou
-# polluting_facilities) d'une forme (point ou polygon), avec les propriétés données (expressions SQL sur la table
+# Tuile vectorielle (MVT, couche « features ») des sites d'une table de sites (casias, basol, sis_sites, sup_sites
+# ou polluting_facilities) d'une forme (point ou polygon), avec les propriétés données (expressions SQL sur la table
 # « s ») ; b"" si aucun site ne touche la tuile.
 def _sites_tile(connection: Connection, table: str, properties: str, shape: str, z: int, x: int, y: int) -> bytes:
     tile = connection.execute(
@@ -227,6 +228,16 @@ def sis_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> byte
         "s.id_inventaire_classification, s.date_ap, s.url_fiche"
     )
     return _sites_tile(connection, "sis_sites", properties, shape, z, x, y)
+
+
+# Servitudes SUP (table sup_sites, migration 0054) : mêmes propriétés que les secteurs SIS, date_ap étant celle de
+# l'arrêté qui institue la servitude.
+def sup_tile(connection: Connection, shape: str, z: int, x: int, y: int) -> bytes:
+    properties = (
+        "s.code_metier, s.nom_etablissement, s.adresse, s.code_postal, s.nom_commune, s.code_insee, "
+        "s.id_inventaire_classification, s.date_ap, s.url_fiche"
+    )
+    return _sites_tile(connection, "sup_sites", properties, shape, z, x, y)
 
 
 # Établissements pollueurs (table polluting_facilities, migration 0053) : identifiant IREP, nom, code APE, code

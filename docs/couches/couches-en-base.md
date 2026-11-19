@@ -267,6 +267,32 @@ python -m app.domains.layer_catalog.polluting_facilities C:\apps\solscore\solsco
 Quelques secondes, 8 Mo en base : 23 197 points. Légende : dessinée par le front à partir de `params.color`
 (orange `#e08214`, rond cerné de sombre).
 
+## Les servitudes d'utilité publique liées à la pollution des sols (SUP)
+
+Couche `fr-georisques-sup`, type `sup` (migration `0054`, ADR-0074 du front), créée par la migration dans la
+catégorie « environnement », juste après les secteurs SIS (le catalogue n'avait pas de couche SUP). Même modèle
+que SIS : table dédiée `sup_sites` (emprises seules), servie en tuiles vectorielles, vides sous le zoom 12. Pas de
+tableau dans l'enquête. L'import est commun avec CASIAS, BASOL et SIS (`site_layers.py`).
+
+Source : `SUP.gpkg`, extrait transmis par le métier (table `SSP_CLASSIF_SUP_GE`, 888 emprises au 17/11/2026). Il
+n'est pas versionné. Une servitude répétée sur plusieurs communes garde la première ligne du fichier, d'où 35
+lignes écartées pour l'extrait complet.
+
+```bash
+docker cp SUP.gpkg solscore_fastapi:/tmp/SUP.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.sup /tmp/SUP.gpkg
+docker exec solscore_fastapi rm /tmp/SUP.gpkg
+```
+
+Sur le serveur Windows, avec le Python de l'environnement du back :
+
+```powershell
+python -m app.domains.layer_catalog.sup C:\apps\solscore\solscore_apis\database\sup\SUP.gpkg
+```
+
+Moins d'une seconde, 853 emprises. Légende : dessinée par le front à partir de `params.color` (vert d'eau
+`#018571`).
+
 ## Les milieux humides du sud du Québec
 
 Couche `ca-qc-milieux-humides`, type `wetlands` (migration `0049`, ADR-0069 du front). Comme la BSS et CASIAS,
