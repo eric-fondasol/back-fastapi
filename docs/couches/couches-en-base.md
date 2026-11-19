@@ -293,6 +293,34 @@ python -m app.domains.layer_catalog.sup C:\apps\solscore\solscore_apis\database\
 Moins d'une seconde, 853 emprises. Légende : dessinée par le front à partir de `params.color` (vert d'eau
 `#018571`).
 
+## Les installations classées (ICPE)
+
+Couche `fr-georisques-icpe`, type `icpe` (migration `0055`, ADR-0075 du front). Même modèle que les établissements
+pollueurs : table dédiée `icpe_sites` (points seuls), servie en tuiles vectorielles, vides sous le zoom 11, et au
+tableau « Sites ICPE » de l'enquête (`POST /fr/environment/icpe-sites`). L'import est commun avec les autres
+couches de sites (`site_layers.py`) ; le fichier n'ayant pas de `code_metier`, une installation est identifiée par
+`code_aiot`.
+
+Source : `ICPE.gpkg`, extrait transmis par le métier (table `INSTALLATIONS_CLASSEES_SIMPLIFIE_GE`, 136 194 points
+au 18/11/2026). Il n'est pas versionné.
+
+```bash
+docker cp ICPE.gpkg solscore_fastapi:/tmp/ICPE.gpkg
+docker exec solscore_fastapi python -m app.domains.layer_catalog.icpe /tmp/ICPE.gpkg
+docker exec solscore_fastapi rm /tmp/ICPE.gpkg
+```
+
+Sur le serveur Windows, avec le Python de l'environnement du back :
+
+```powershell
+python -m app.domains.layer_catalog.icpe C:\apps\solscore\solscore_apis\database\icpe\ICPE.gpkg
+```
+
+5 s en local, 59 Mo en base : 136 194 points. Légende : dessinée par le front à partir de `params.classes`
+(par valeur de la colonne `legende`) : icône de la légende de Géorisques pour chaque catégorie (`icon`, migration
+`0056` : usine Seveso, usine non Seveso, éolienne, élevages, carrière), rond gris pour les autres installations ;
+aucune image à importer.
+
 ## Les milieux humides du sud du Québec
 
 Couche `ca-qc-milieux-humides`, type `wetlands` (migration `0049`, ADR-0069 du front). Comme la BSS et CASIAS,

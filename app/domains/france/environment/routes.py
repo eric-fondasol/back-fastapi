@@ -1,5 +1,5 @@
 # Routes de l'environnement du site en France : /fr/environment/…, lues sur l'API Solscore v2, sauf les sites
-# CASIAS, BASOL et SIS, lus en base (sites.py).
+# CASIAS, BASOL, SIS et ICPE, lus en base (sites.py).
 # Protégées par le jeton (le routeur France est branché avec dependencies=protected dans main.py).
 
 from fastapi import APIRouter
@@ -46,3 +46,11 @@ def basol_sites(search: RadiusSearch) -> dict:
 def sis_sites(search: RadiusSearch) -> dict:
     with refonte_transaction() as connection:
         return sites.sites_within(connection, sites.SIS, search)
+
+
+# Installations classées (ICPE) dans le rayon, triées par distance, lues dans la table icpe_sites, celle de la
+# couche ICPE (voir sites.py) ; l'ancien front les lisait sur l'API Géorisques (installations_classees).
+@router.post("/icpe-sites")
+def icpe_sites(search: RadiusSearch) -> dict:
+    with refonte_transaction() as connection:
+        return sites.sites_within(connection, sites.ICPE, search)

@@ -10,6 +10,7 @@ AVRIL = {"lat": 49.2668, "lon": 6.0206}
 ROUTE = "/fr/environment/basol-sites"
 CASIAS_ROUTE = "/fr/environment/casias-sites"
 SIS_ROUTE = "/fr/environment/sis-sites"
+ICPE_ROUTE = "/fr/environment/icpe-sites"
 
 
 def site(connection, shape, code, wkt, name="Crassiers", town="AVRIL"):
@@ -27,7 +28,7 @@ def site(connection, shape, code, wkt, name="Crassiers", town="AVRIL"):
 @pytest.fixture
 def client(refonte_database, monkeypatch):
     def no_solscore_api(*args, **kwargs):
-        raise AssertionError("les sites CASIAS, BASOL et SIS sont lus en base, pas sur l'API Solscore v2")
+        raise AssertionError("les sites CASIAS, BASOL, SIS et ICPE sont lus en base, pas sur l'API Solscore v2")
 
     monkeypatch.setattr(solscore_api, "post", no_solscore_api)
     with refonte_database.begin() as connection:
@@ -54,6 +55,20 @@ def client(refonte_database, monkeypatch):
                 """
             )
         )
+        for code, name, wkt in (
+            ("0005704438", "Carrières de l'Orne", "POINT(6.0206 49.2698)"),
+            ("0005704805", "Laminoir", "POINT(6.0206 49.2678)"),
+        ):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO icpe_sites (shape, code_aiot, raison_sociale, commune, activite_principale, seveso, etat_activite, regime_vig, legende, url_fiche, geometry)
+                    VALUES ('point', :code, :name, 'AVRIL', '08 - Autres industries extractives', 'Non Seveso', 'En exploitation avec titre', 'Autorisation',
+                            'Carrière', :fiche, ST_Transform(ST_GeomFromText(:wkt, 4326), 3857))
+                    """
+                ),
+                {"code": code, "name": name, "wkt": wkt, "fiche": f"https://www.georisques.gouv.fr/risques/installations/donnees/details/{code}"},
+            )
     app.dependency_overrides[current_user] = lambda: "test@fondasol.fr"
 
     with TestClient(app) as test_client:
@@ -127,3 +142,26 @@ def test_the_sis_sectors_come_from_their_table(client):
     )
     assert sector["url_fiche"] == "https://fiches-risques.brgm.fr/georisques/infosols/classification/SSP00073030201"
     assert 600 < sector["distance_m"] < 750
+
+
+def test_the_classified_installations_come_from_their_table_one_per_aiot_code_by_distance(client):
+    body = client.post(ICPE_ROUTE, json={**AVRIL, "rayon_m": 1000}).json()
+
+    assert body["nombre_total"] == 2
+    installations = [feature["properties"] for feature in body["data"]["features"]]
+    assert [(installation["code_aiot"], installation["distance_m"]) for installation in installations] == [("0005704805", 111), ("0005704438", 334)]
+    assert installations[1] == {
+        "code_aiot": "0005704438",
+        "url_fiche": "https://www.georisques.gouv.fr/risques/installations/donnees/details/0005704438",
+        "raison_sociale": "Carrières de l'Orne",
+        "adresse": None,
+        "code_postal": None,
+        "commune": "AVRIL",
+        "activite_principale": "08 - Autres industries extractives",
+        "seveso": "Non Seveso",
+        "etat_activite": "En exploitation avec titre",
+        "regime_vig": "Autorisation",
+        "legende": "Carrière",
+        "type_geometrie": "point",
+        "distance_m": 334,
+    }

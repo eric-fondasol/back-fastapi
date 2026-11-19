@@ -1,8 +1,10 @@
 # Import commun des couches de sites en base, lues dans un extrait GeoPackage de Géorisques à une table par forme
 # (points, emprises) : sites CASIAS (casias.py, migration 0048), sites BASOL (basol.py, migration 0051), secteurs
 # SIS (sis.py, migration 0052, emprises seules), établissements pollueurs (polluting_facilities.py, migration
-# 0053, points seuls) et servitudes SUP (sup.py, migration 0054, emprises seules). Chaque couche décrit sa table, les tables du fichier par forme et la colonne qui identifie
-# un site (SiteLayer : code_metier, sauf pour les établissements pollueurs, qui n'en ont pas).
+# 0053, points seuls), servitudes SUP (sup.py, migration 0054, emprises seules) et installations classées
+# (icpe.py, migration 0055, points seuls). Chaque couche décrit sa table, les tables du fichier par forme et la
+# colonne qui identifie un site (SiteLayer : code_metier, sauf pour les établissements pollueurs et les ICPE, qui
+# n'en ont pas).
 #
 # Le GeoPackage est lu avec sqlite3 (pas de GDAL dans l'image) ; la géométrie, un en-tête GeoPackage suivi de WKB,
 # est confiée telle quelle à PostGIS une fois l'en-tête retiré. Les colonnes copiées sont celles de la table qui
